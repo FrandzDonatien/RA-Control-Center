@@ -1,0 +1,1 @@
+COLORS={"bg":"#06111F","sidebar":"#091827","panel":"#0D1D30","panel_2":"#10243A","border":"#1D3855","text":"#F2F7FC","muted":"#8FA6BD","accent":"#1688F7","success":"#19C37D"}
