@@ -792,7 +792,9 @@ class Dashboard:
         DetailModal(
             self.root,
             card,
-            self.repository
+            self.repository,
+            self.perimetre_var.get(),
+            self.mode_var.get()
         )
 
     # =============================================================

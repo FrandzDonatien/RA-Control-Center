@@ -8,12 +8,14 @@ from ui.trend import TrendChart
 
 class DetailModal(tk.Toplevel):
 
-    def __init__(self, parent, card, repository):
+    def __init__(self, parent, card, repository, perimetre="FXL", mode_execution="COMMIT"):
 
         super().__init__(parent)
 
         self.card = card
         self.repository = repository
+        self.perimetre = perimetre
+        self.mode_execution = mode_execution
 
         self.title(
             f"CTRL-{card.control_id:02d} — "
@@ -138,7 +140,7 @@ class DetailModal(tk.Toplevel):
 
         montant = (
             f"{self.card.montant_impacte:,.0f}"
-            if self.card.montant_impacte
+            if self.card.montant_impacte is not None
             else "—"
         )
 
@@ -398,7 +400,9 @@ class DetailModal(tk.Toplevel):
 
         self.rows = self.repository.get_details(
             self.card.control_id,
-            self.card.date_controle
+            self.card.date_controle,
+            self.perimetre,
+            self.mode_execution
         )
 
         self.build_dynamic_columns()
@@ -406,10 +410,15 @@ class DetailModal(tk.Toplevel):
         trend = self.repository.get_trend(
             self.card.control_id,
             self.card.date_controle,
+            self.perimetre,
+            self.mode_execution,
             7
         )
 
-        self.chart.redraw(trend)
+        # get_trend renvoie les dates du plus recent au plus ancien
+        # (ORDER BY date_controle DESC) -- on remet dans l'ordre
+        # chronologique pour que le graphique se lise de gauche a droite
+        self.chart.redraw(list(reversed(trend)))
 
         self.filter_rows()
 
