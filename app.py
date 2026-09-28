@@ -2,7 +2,6 @@ from tkinter import Tk
 import sys
 import ctypes
 from ui.dashboard import Dashboard
-from config import APP_TITLE
 
 
 def enable_high_dpi():

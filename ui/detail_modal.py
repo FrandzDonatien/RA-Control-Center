@@ -1,42 +1,106 @@
 import tkinter as tk
 from tkinter import ttk
-import json
 
-from config import COLORS
+import customtkinter as ctk
+
+from ui.icons import icon
+from ui.palette import COLORS, FONT, MONO, SEVERITY_COLORS, SEVERITY_ICONS
 from ui.trend import TrendChart
 
 
-class DetailModal(tk.Toplevel):
+class DetailModal(ctk.CTkToplevel):
+
+    WIDTH = 1180
+    HEIGHT = 720
 
     def __init__(self, parent, card, repository, perimetre="FXL", mode_execution="COMMIT"):
-
         super().__init__(parent)
+        self.withdraw()  # on affiche la fenêtre une fois construite
 
         self.card = card
         self.repository = repository
         self.perimetre = perimetre
         self.mode_execution = mode_execution
 
-        self.title(
-            f"CTRL-{card.control_id:02d} — "
-            f"{card.control_name}"
-        )
-
-        self.configure(
-            bg=COLORS["bg"]
-        )
-
-        self.geometry("1100x650")
-        self.minsize(900, 550)
-
-        self.transient(parent)
-        self.grab_set()
+        self.title(f"CTRL-{card.control_id:02d} — {card.control_name}")
+        self.configure(fg_color=COLORS["bg"])
+        self.minsize(980, 600)
+        self._place(parent)
 
         self.search_var = tk.StringVar()
 
+        self._fonts()
+        self._style_tree()
         self.build()
-
         self.load_data()
+
+        self.transient(parent)
+        self.deiconify()
+        self.after(150, self._activate)
+
+    # =============================================================
+    # OUTILS FENETRE
+    # =============================================================
+
+    def _place(self, parent):
+        try:
+            parent.update_idletasks()
+            x = parent.winfo_rootx() + (parent.winfo_width() - self.WIDTH) // 2
+            y = parent.winfo_rooty() + (parent.winfo_height() - self.HEIGHT) // 2
+            self.geometry(f"{self.WIDTH}x{self.HEIGHT}+{max(x, 0)}+{max(y, 0)}")
+        except Exception:
+            self.geometry(f"{self.WIDTH}x{self.HEIGHT}")
+
+    def _activate(self):
+        try:
+            self.lift()
+            self.focus_force()
+            self.grab_set()
+        except Exception:
+            pass
+
+    # =============================================================
+    # POLICES / STYLE
+    # =============================================================
+
+    def _fonts(self):
+        self.f_title = ctk.CTkFont(family=FONT, size=20, weight="bold")
+        self.f_desc = ctk.CTkFont(family=FONT, size=11)
+        self.f_id = ctk.CTkFont(family=MONO, size=10, weight="bold")
+        self.f_btn = ctk.CTkFont(family=FONT, size=11, weight="bold")
+        self.f_sum_label = ctk.CTkFont(family=FONT, size=10)
+        self.f_sum_value = ctk.CTkFont(family=FONT, size=18, weight="bold")
+        self.f_card_title = ctk.CTkFont(family=FONT, size=13, weight="bold")
+        self.f_small = ctk.CTkFont(family=FONT, size=10)
+        self.f_search = ctk.CTkFont(family=FONT, size=11)
+
+    def _style_tree(self):
+
+        style = ttk.Style(self)
+        style.theme_use("clam")
+
+        style.configure(
+            "Detail.Treeview",
+            background=COLORS["panel"], fieldbackground=COLORS["panel"],
+            foreground=COLORS["text"], rowheight=36, borderwidth=0,
+            font=(FONT, 10)
+        )
+        style.configure(
+            "Detail.Treeview.Heading",
+            background=COLORS["panel_2"], foreground=COLORS["muted"],
+            font=(FONT, 9, "bold"), relief="flat", borderwidth=0,
+            padding=(12, 9)
+        )
+        style.map(
+            "Detail.Treeview",
+            background=[("selected", COLORS["accent_soft"])],
+            foreground=[("selected", COLORS["accent"])]
+        )
+        style.map(
+            "Detail.Treeview.Heading",
+            background=[("active", COLORS["track"])]
+        )
+        style.layout("Detail.Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
 
     # =============================================================
     # BUILD
@@ -44,353 +108,258 @@ class DetailModal(tk.Toplevel):
 
     def build(self):
 
+        severite = self.card.severite or "N/A"
+        color, soft = SEVERITY_COLORS.get(severite, SEVERITY_COLORS["N/A"])
+        sev_icon = SEVERITY_ICONS.get(severite, "warning")
+
         # =========================================================
         # HEADER
         # =========================================================
 
-        header = tk.Frame(
-            self,
-            bg=COLORS["panel"]
-        )
+        header = ctk.CTkFrame(self, fg_color=COLORS["panel"], corner_radius=0)
+        header.pack(fill="x")
 
-        header.pack(
-            fill="x",
-            padx=1,
-            pady=1
-        )
+        ctk.CTkFrame(self, fg_color=COLORS["border"], height=1, corner_radius=0).pack(fill="x")
 
-        left = tk.Frame(
-            header,
-            bg=COLORS["panel"]
-        )
+        inner = ctk.CTkFrame(header, fg_color="transparent")
+        inner.pack(fill="x", padx=28, pady=20)
 
-        left.pack(
-            side="left",
-            padx=20,
-            pady=15
-        )
+        box = ctk.CTkFrame(inner, fg_color=soft, width=52, height=52, corner_radius=14)
+        box.pack(side="left", padx=(0, 16))
+        box.pack_propagate(False)
 
-        tk.Label(
-            left,
-            text=(
-                f"CTRL-{self.card.control_id:02d} "
-                f"— {self.card.control_name}"
-            ),
-            font=("Georgia", 17, "bold"),
-            bg=COLORS["panel"],
-            fg=COLORS["text"]
-        ).pack(
-            anchor="w"
-        )
+        ctk.CTkLabel(
+            box, text="", image=icon(sev_icon, color, 26), fg_color="transparent"
+        ).pack(expand=True)
 
-        tk.Label(
-            left,
-            text=self.card.description,
-            font=("Segoe UI", 9),
-            bg=COLORS["panel"],
-            fg="#8f949e"
-        ).pack(
-            anchor="w",
-            pady=(5, 0)
-        )
+        titles = ctk.CTkFrame(inner, fg_color="transparent")
+        titles.pack(side="left")
 
-        tk.Button(
-            header,
-            text="Fermer",
-            command=self.destroy,
-            bg=COLORS["panel"],
-            fg="#bfc3ca",
-            activebackground=COLORS["panel_2"],
-            activeforeground="white",
-            relief="flat",
-            padx=12,
-            pady=6
-        ).pack(
-            side="right",
-            padx=18
-        )
+        line = ctk.CTkFrame(titles, fg_color="transparent")
+        line.pack(anchor="w")
+
+        ctk.CTkLabel(
+            line, text=f"  CTRL-{self.card.control_id:02d}  ", font=self.f_id,
+            text_color=COLORS["accent"], fg_color=COLORS["accent_soft"],
+            corner_radius=8, height=24
+        ).pack(side="left", padx=(0, 10))
+
+        ctk.CTkLabel(
+            line, text=self.card.control_name, font=self.f_title,
+            text_color=COLORS["text"], fg_color="transparent"
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            titles, text=self.card.description or "", font=self.f_desc,
+            text_color=COLORS["muted"], fg_color="transparent",
+            anchor="w", justify="left", wraplength=760
+        ).pack(anchor="w", pady=(6, 0))
+
+        ctk.CTkButton(
+            inner, text="  Fermer", font=self.f_btn, command=self.destroy,
+            image=icon("close", COLORS["text_soft"], 16), compound="left",
+            fg_color=COLORS["panel"], hover_color=COLORS["panel_2"],
+            text_color=COLORS["text_soft"], border_width=1,
+            border_color=COLORS["border"], corner_radius=10, height=38, width=110
+        ).pack(side="right")
 
         # =========================================================
         # SUMMARY
         # =========================================================
 
-        summary = tk.Frame(
-            self,
-            bg=COLORS["bg"]
-        )
+        summary = ctk.CTkFrame(self, fg_color="transparent")
+        summary.pack(fill="x", padx=28, pady=(20, 14))
 
-        summary.pack(
-            fill="x",
-            padx=20,
-            pady=(15, 10)
-        )
-
-        self.create_summary(
-            summary,
-            str(self.card.nb_items),
-            "Éléments détectés"
-        )
-
-        self.create_summary(
-            summary,
-            self.card.severite,
-            "Sévérité",
-            self.card.severite
-        )
+        for i in range(4):
+            summary.grid_columnconfigure(i, weight=1, uniform="sum")
 
         montant = (
-            f"{self.card.montant_impacte:,.0f}"
+            f"{self.card.montant_impacte:,.0f}".replace(",", " ")
             if self.card.montant_impacte is not None
             else "—"
         )
 
-        self.create_summary(
-            summary,
-            montant,
-            "Montant impacté"
-        )
+        items = [
+            (str(self.card.nb_items), "Éléments détectés", "list",
+             COLORS["accent"], COLORS["accent_soft"], COLORS["text"]),
+            (severite, "Sévérité", sev_icon, color, soft, color),
+            (montant, "Montant impacté", "money",
+             COLORS["accent"], COLORS["accent_soft"], COLORS["text"]),
+            (self.card.frequence or "—", "Fréquence", "clock",
+             COLORS["accent"], COLORS["accent_soft"], COLORS["text"]),
+        ]
 
-        self.create_summary(
-            summary,
-            self.card.frequence,
-            "Fréquence"
-        )
-
-        # =========================================================
-        # SEARCH
-        # =========================================================
-
-        search = tk.Frame(
-            self,
-            bg=COLORS["bg"]
-        )
-
-        search.pack(
-            fill="x",
-            padx=20,
-            pady=(5, 8)
-        )
-
-        tk.Label(
-            search,
-            text="Recherche :",
-            font=("Segoe UI", 9),
-            bg=COLORS["bg"],
-            fg="#777d88"
-        ).pack(
-            side="left",
-            padx=(0, 8)
-        )
-
-        entry = tk.Entry(
-            search,
-            textvariable=self.search_var,
-            width=35,
-            font=("Segoe UI", 9),
-            bg=COLORS["panel_2"],
-            fg="#e4e5e8",
-            insertbackground="white",
-            relief="flat"
-        )
-
-        entry.pack(
-            side="left",
-            ipady=6
-        )
-
-        self.search_var.trace_add(
-            "write",
-            lambda *_: self.filter_rows()
-        )
+        for i, (value, label, icon_name, ico_color, ico_bg, val_color) in enumerate(items):
+            self.create_summary(summary, i, value, label, icon_name,
+                                ico_color, ico_bg, val_color)
 
         # =========================================================
         # BODY
         # =========================================================
 
-        body = tk.Frame(
-            self,
-            bg=COLORS["bg"]
-        )
-
-        body.pack(
-            fill="both",
-            expand=True,
-            padx=20,
-            pady=(0, 20)
-        )
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=28, pady=(0, 24))
 
         # ---------------------------------------------------------
         # TABLE
         # ---------------------------------------------------------
 
-        left = tk.Frame(
-            body,
-            bg=COLORS["panel"],
-            highlightthickness=1,
-            highlightbackground=COLORS["border"]
+        table_card = ctk.CTkFrame(
+            body, fg_color=COLORS["panel"], corner_radius=16,
+            border_width=1, border_color=COLORS["border"]
         )
+        table_card.pack(side="left", fill="both", expand=True, padx=(0, 8))
 
-        left.pack(
-            side="left",
-            fill="both",
-            expand=True,
-            padx=(0, 7)
-        )
+        thead = ctk.CTkFrame(table_card, fg_color="transparent")
+        thead.pack(fill="x", padx=20, pady=(16, 12))
 
-        tk.Label(
-            left,
-            text="Éléments détectés — dernière exécution",
-            font=("Segoe UI", 9),
-            bg=COLORS["panel"],
-            fg="#8f949e"
-        ).pack(
-            anchor="w",
-            padx=14,
-            pady=(12, 8)
-        )
+        titles2 = ctk.CTkFrame(thead, fg_color="transparent")
+        titles2.pack(side="left")
 
-        tree_container = tk.Frame(
-            left,
-            bg=COLORS["panel"]
-        )
+        ctk.CTkLabel(
+            titles2, text="Éléments détectés", font=self.f_card_title,
+            text_color=COLORS["text"], fg_color="transparent"
+        ).pack(anchor="w")
 
-        tree_container.pack(
-            fill="both",
-            expand=True,
-            padx=10,
-            pady=(0, 10)
+        self.count_label = ctk.CTkLabel(
+            titles2, text="Dernière exécution", font=self.f_small,
+            text_color=COLORS["muted"], fg_color="transparent"
         )
+        self.count_label.pack(anchor="w")
+
+        search = ctk.CTkFrame(
+            thead, fg_color=COLORS["panel"], corner_radius=10,
+            border_width=1, border_color=COLORS["border"], width=300, height=38
+        )
+        search.pack(side="right")
+        search.pack_propagate(False)
+
+        ctk.CTkLabel(
+            search, text="", image=icon("search", COLORS["muted"], 16),
+            fg_color="transparent"
+        ).pack(side="left", padx=(12, 4))
+
+        ctk.CTkEntry(
+            search, textvariable=self.search_var, font=self.f_search,
+            placeholder_text="Rechercher...", fg_color="transparent",
+            border_width=0, text_color=COLORS["text"],
+            placeholder_text_color=COLORS["muted"]
+        ).pack(side="left", fill="both", expand=True, padx=(0, 8))
+
+        self.search_var.trace_add("write", lambda *_: self.filter_rows())
+
+        ctk.CTkFrame(table_card, fg_color=COLORS["border"], height=1).pack(fill="x")
+
+        tree_container = ctk.CTkFrame(table_card, fg_color="transparent")
+        tree_container.pack(fill="both", expand=True, padx=(1, 1), pady=(0, 8))
+
+        tree_container.grid_rowconfigure(0, weight=1)
+        tree_container.grid_columnconfigure(0, weight=1)
 
         self.tree = ttk.Treeview(
-            tree_container,
-            show="headings"
+            tree_container, show="headings", style="Detail.Treeview"
         )
+        self.tree.grid(row=0, column=0, sticky="nsew")
 
-        self.tree.pack(
-            side="left",
-            fill="both",
-            expand=True
+        vsb = ctk.CTkScrollbar(
+            tree_container, orientation="vertical", command=self.tree.yview,
+            width=12, fg_color="transparent",
+            button_color=COLORS["track"], button_hover_color=COLORS["muted"]
         )
+        vsb.grid(row=0, column=1, sticky="ns", padx=(2, 4))
 
-        scrollbar = ttk.Scrollbar(
-            tree_container,
-            orient="vertical",
-            command=self.tree.yview
+        hsb = ctk.CTkScrollbar(
+            tree_container, orientation="horizontal", command=self.tree.xview,
+            height=12, fg_color="transparent",
+            button_color=COLORS["track"], button_hover_color=COLORS["muted"]
         )
+        hsb.grid(row=1, column=0, sticky="ew", padx=4, pady=(2, 2))
 
-        scrollbar.pack(
-            side="right",
-            fill="y"
-        )
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-        self.tree.configure(
-            yscrollcommand=scrollbar.set
-        )
+        self.tree.tag_configure("odd", background=COLORS["bg"])
+        self.tree.tag_configure("even", background=COLORS["panel"])
 
         # ---------------------------------------------------------
         # TREND
         # ---------------------------------------------------------
 
-        right = tk.Frame(
-            body,
-            bg=COLORS["panel"],
-            highlightthickness=1,
-            highlightbackground=COLORS["border"],
-            width=390
+        trend_card = ctk.CTkFrame(
+            body, fg_color=COLORS["panel"], corner_radius=16,
+            border_width=1, border_color=COLORS["border"], width=390
         )
+        trend_card.pack(side="right", fill="y", padx=(8, 0))
+        trend_card.pack_propagate(False)
 
-        right.pack(
-            side="right",
-            fill="both",
-            padx=(7, 0)
+        thead2 = ctk.CTkFrame(trend_card, fg_color="transparent")
+        thead2.pack(fill="x", padx=20, pady=(16, 12))
+
+        tbox = ctk.CTkFrame(
+            thead2, fg_color=COLORS["accent_soft"], width=34, height=34, corner_radius=10
         )
+        tbox.pack(side="left", padx=(0, 10))
+        tbox.pack_propagate(False)
 
-        right.pack_propagate(False)
+        ctk.CTkLabel(
+            tbox, text="", image=icon("chart", COLORS["accent"], 18),
+            fg_color="transparent"
+        ).pack(expand=True)
 
-        tk.Label(
-            right,
-            text="Tendance — 7 dernières exécutions",
-            font=("Segoe UI", 9),
-            bg=COLORS["panel"],
-            fg="#8f949e"
-        ).pack(
-            anchor="w",
-            padx=14,
-            pady=(12, 4)
-        )
+        ttl = ctk.CTkFrame(thead2, fg_color="transparent")
+        ttl.pack(side="left")
 
-        self.chart = TrendChart(
-            right,
-            height=220
-        )
+        ctk.CTkLabel(
+            ttl, text="Tendance", font=self.f_card_title,
+            text_color=COLORS["text"], fg_color="transparent"
+        ).pack(anchor="w")
 
-        self.chart.pack(
-            fill="both",
-            expand=True,
-            padx=10,
-            pady=10
-        )
+        ctk.CTkLabel(
+            ttl, text="7 dernières exécutions", font=self.f_small,
+            text_color=COLORS["muted"], fg_color="transparent"
+        ).pack(anchor="w")
+
+        ctk.CTkFrame(trend_card, fg_color=COLORS["border"], height=1).pack(fill="x")
+
+        self.chart = TrendChart(trend_card, height=220)
+        self.chart.pack(fill="both", expand=True, padx=12, pady=12)
 
     # =============================================================
     # SUMMARY CARD
     # =============================================================
 
-    def create_summary(
-        self,
-        parent,
-        value,
-        label,
-        status=None
-    ):
+    def create_summary(self, parent, column, value, label, icon_name,
+                       icon_color, icon_bg, value_color):
 
-        frame = tk.Frame(
-            parent,
-            bg=COLORS["panel"],
-            highlightthickness=1,
-            highlightbackground=COLORS["border"]
+        frame = ctk.CTkFrame(
+            parent, fg_color=COLORS["panel"], corner_radius=16,
+            border_width=1, border_color=COLORS["border"]
         )
+        frame.grid(row=0, column=column, sticky="nsew",
+                   padx=(0 if column == 0 else 8, 0))
 
-        frame.pack(
-            side="left",
-            fill="x",
-            expand=True,
-            padx=2
+        box = ctk.CTkFrame(
+            frame, fg_color=icon_bg, width=44, height=44, corner_radius=12
         )
+        box.pack(side="left", padx=(18, 14), pady=18)
+        box.pack_propagate(False)
 
-        color = COLORS["text"]
+        ctk.CTkLabel(
+            box, text="", image=icon(icon_name, icon_color, 22),
+            fg_color="transparent"
+        ).pack(expand=True)
 
-        if status == "CRITIQUE":
-            color = COLORS["critical"]
+        texts = ctk.CTkFrame(frame, fg_color="transparent")
+        texts.pack(side="left", fill="x", expand=True, pady=14)
 
-        elif status == "ATTENTION":
-            color = COLORS["attention"]
+        ctk.CTkLabel(
+            texts, text=label, font=self.f_sum_label,
+            text_color=COLORS["muted"], fg_color="transparent", anchor="w"
+        ).pack(anchor="w")
 
-        elif status == "OK":
-            color = COLORS["ok"]
-
-        tk.Label(
-            frame,
-            text=value,
-            font=("Segoe UI", 15, "bold"),
-            bg=COLORS["panel"],
-            fg=color
-        ).pack(
-            anchor="w",
-            padx=12,
-            pady=(10, 0)
-        )
-
-        tk.Label(
-            frame,
-            text=label,
-            font=("Segoe UI", 8),
-            bg=COLORS["panel"],
-            fg="#777d88"
-        ).pack(
-            anchor="w",
-            padx=12,
-            pady=(0, 10)
-        )
+        ctk.CTkLabel(
+            texts, text=value, font=self.f_sum_value,
+            text_color=value_color, fg_color="transparent", anchor="w"
+        ).pack(anchor="w")
 
     # =============================================================
     # DATA
@@ -450,22 +419,24 @@ class DetailModal(tk.Toplevel):
 
             self.tree.heading(
                 column,
-                text=column
+                text=column.replace("_", " ").upper(),
+                anchor="w"
             )
 
             if column == "cle_metier":
-                width = 120
+                width = 130
 
             elif column == "categorie":
-                width = 160
+                width = 170
 
             else:
-                width = 130
+                width = 140
 
             self.tree.column(
                 column,
                 width=width,
-                minwidth=90
+                minwidth=90,
+                anchor="w"
             )
 
     # =============================================================
@@ -486,6 +457,8 @@ class DetailModal(tk.Toplevel):
 
         for item in self.tree.get_children():
             self.tree.delete(item)
+
+        shown = 0
 
         for row in self.rows:
 
@@ -513,5 +486,11 @@ class DetailModal(tk.Toplevel):
             self.tree.insert(
                 "",
                 "end",
-                values=values
+                values=values,
+                tags=("odd" if shown % 2 else "even",)
             )
+            shown += 1
+
+        self.count_label.configure(
+            text=f"{shown} sur {len(self.rows)} éléments — dernière exécution"
+        )
