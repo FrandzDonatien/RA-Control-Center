@@ -2,10 +2,11 @@ import tkinter as tk
 from tkinter import messagebox
 from datetime import datetime
 
+import customtkinter as ctk
+
 from config import COLORS, APP_TITLE, APP_WIDTH, APP_HEIGHT, DEMO_MODE
 from services.dashboard_service import DashboardService
 from services.demo_data import DemoRepository
-from ui.widgets import StatCard, ControlCard
 from ui.detail_modal import DetailModal
 
 
@@ -16,22 +17,37 @@ FAMILIES = {
     "Revue qualitative": "Revue qualitative",
 }
 
+SEVERITY_COLORS = {
+    "CRITIQUE": (COLORS["critical"], COLORS.get("critical_bg", COLORS["panel_2"])),
+    "ATTENTION": (COLORS["attention"], COLORS.get("attention_bg", COLORS["panel_2"])),
+    "OK": (COLORS["ok"], COLORS.get("ok_bg", COLORS["panel_2"])),
+    "N/A": (COLORS["muted"], COLORS["panel_2"]),
+}
+
+NAV_ITEMS = [
+    ("dashboard", "Dashboard", "🏠"),
+    ("catalogue", "Catalogue", "☰"),
+    ("categories", "Catégories", "🗂"),
+    ("resumes", "Résumés", "📊"),
+    ("details", "Détails", "🔍"),
+]
+
 
 class Dashboard:
 
-    def __init__(self, root):
+    def __init__(self, root, perimetre="FXL", mode_execution="COMMIT"):
 
         self.root = root
 
         self.root.title(APP_TITLE)
         self.root.geometry(f"{APP_WIDTH}x{APP_HEIGHT}")
-        self.root.minsize(1100, 700)
-        self.root.configure(bg=COLORS["bg"])
-        self.perimetre_var = tk.StringVar(value="FXL")
+        self.root.minsize(1200, 750)
+        self.root.configure(fg_color=COLORS["bg"]) if hasattr(self.root, "configure") else None
 
-        self.mode_var = tk.StringVar(
-            value="COMMIT"
-        )
+        self.perimetre_var = tk.StringVar(value=perimetre)
+        self.mode_var = tk.StringVar(value=mode_execution)
+        self.family_var = tk.StringVar(value="Toutes les familles")
+        self.date_var = tk.StringVar(value="")
 
         # ---------------------------------------------------------
         # Repository
@@ -40,10 +56,8 @@ class Dashboard:
         if DEMO_MODE:
             self.repository = DemoRepository()
             self.demo = True
-
         else:
             from repositories.control_repository import ControlRepository
-
             self.repository = ControlRepository()
             self.demo = False
 
@@ -51,111 +65,167 @@ class Dashboard:
 
         self.cards = []
         self.selected_date = None
+        self.stat_widgets = {}
 
-        self.family_var = tk.StringVar(
-            value="Toutes les familles"
-        )
-
-        self.date_var = tk.StringVar(
-            value=""
-        )
-
-        self.content = None
-
+        self._fonts()
         self.build_interface()
-
         self.refresh()
 
     # =============================================================
-    # INTERFACE
+    # POLICES
+    # =============================================================
+
+    def _fonts(self):
+        self.f_brand = ctk.CTkFont(family="Segoe UI", size=15, weight="bold")
+        self.f_brand_sub = ctk.CTkFont(family="Segoe UI", size=10)
+        self.f_nav = ctk.CTkFont(family="Segoe UI", size=12)
+        self.f_title = ctk.CTkFont(family="Georgia", size=24, weight="bold")
+        self.f_subtitle = ctk.CTkFont(family="Segoe UI", size=11)
+        self.f_meta = ctk.CTkFont(family="Consolas", size=9)
+        self.f_kpi_label = ctk.CTkFont(family="Segoe UI", size=11)
+        self.f_kpi_value = ctk.CTkFont(family="Consolas", size=26, weight="bold")
+        self.f_label = ctk.CTkFont(family="Segoe UI", size=11, weight="bold")
+        self.f_pill = ctk.CTkFont(family="Segoe UI", size=10, weight="bold")
+        self.f_section = ctk.CTkFont(family="Georgia", size=15, weight="bold")
+        self.f_card_id = ctk.CTkFont(family="Consolas", size=9)
+        self.f_card_badge = ctk.CTkFont(family="Segoe UI", size=9, weight="bold")
+        self.f_card_name = ctk.CTkFont(family="Segoe UI", size=12, weight="bold")
+        self.f_card_value = ctk.CTkFont(family="Consolas", size=20, weight="bold")
+        self.f_card_caption = ctk.CTkFont(family="Segoe UI", size=9)
+
+    # =============================================================
+    # INTERFACE GENERALE
     # =============================================================
 
     def build_interface(self):
 
-        container = tk.Frame(
-            self.root,
-            bg=COLORS["bg"]
-        )
+        outer = ctk.CTkFrame(self.root, fg_color=COLORS["bg"], corner_radius=0)
+        outer.pack(fill="both", expand=True)
 
-        container.pack(
-            fill="both",
-            expand=True
-        )
+        self.build_sidebar(outer)
 
-        self.canvas = tk.Canvas(
-            container,
-            bg=COLORS["bg"],
-            highlightthickness=0
-        )
+        main_area = ctk.CTkFrame(outer, fg_color=COLORS["bg"], corner_radius=0)
+        main_area.pack(side="left", fill="both", expand=True)
 
-        scrollbar = tk.Scrollbar(
-            container,
-            orient="vertical",
-            command=self.canvas.yview
+        # Zone scrollable native CustomTkinter -- remplace le systeme
+        # Canvas+Scrollbar manuel
+        self.scroll = ctk.CTkScrollableFrame(
+            main_area, fg_color=COLORS["bg"],
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["muted"]
         )
-
-        self.content = tk.Frame(
-            self.canvas,
-            bg=COLORS["bg"]
-        )
-
-        self.content.bind(
-            "<Configure>",
-            lambda event:
-            self.canvas.configure(
-                scrollregion=self.canvas.bbox("all")
-            )
-        )
-
-        self.content_window = self.canvas.create_window(
-            (0, 0),
-            window=self.content,
-            anchor="n"
-        )
-
-        self.canvas.bind(
-            "<Configure>",
-            self.on_canvas_resize
-        )
-
-        self.canvas.configure(
-            yscrollcommand=scrollbar.set
-        )
-
-        self.canvas.pack(
-            side="left",
-            fill="both",
-            expand=True
-        )
-
-        scrollbar.pack(
-            side="right",
-            fill="y"
-        )
-
-        self.canvas.bind_all(
-            "<MouseWheel>",
-            self.on_mousewheel
-        )
+        self.scroll.pack(fill="both", expand=True, padx=30, pady=(20, 20))
 
         self.build_header()
-
-        self.build_separator()
-
         self.build_statistics()
-
         self.build_toolbar()
 
-        self.sections = tk.Frame(
-            self.content,
-            bg=COLORS["bg"]
-        )
+        self.sections = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        self.sections.pack(fill="both", expand=True, pady=(10, 30))
 
-        self.sections.pack(
-            fill="both",
-            padx=30,
-            pady=(0, 50)
+    # =============================================================
+    # SIDEBAR
+    # =============================================================
+
+    def build_sidebar(self, parent):
+
+        sidebar = ctk.CTkFrame(
+            parent, fg_color=COLORS["panel"], width=250, corner_radius=0,
+            border_width=0
         )
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+
+        brand = ctk.CTkFrame(sidebar, fg_color="transparent")
+        brand.pack(fill="x", padx=24, pady=(26, 20))
+
+        ctk.CTkLabel(
+            brand, text="BillingFixControl", font=self.f_brand,
+            text_color=COLORS["text"], fg_color="transparent"
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            brand, text="Revenue Assurance", font=self.f_brand_sub,
+            text_color=COLORS["muted"], fg_color="transparent"
+        ).pack(anchor="w")
+
+        nav_container = ctk.CTkFrame(sidebar, fg_color="transparent")
+        nav_container.pack(fill="x", padx=14)
+
+        self.nav_frames = {}
+        self.active_nav = "dashboard"
+
+        for key, label, icon in NAV_ITEMS:
+            self.build_nav_item(nav_container, key, label, icon)
+
+        self.update_nav_highlight()
+
+        bottom = ctk.CTkFrame(sidebar, fg_color="transparent")
+        bottom.pack(side="bottom", fill="x", padx=14, pady=20)
+
+        ctk.CTkButton(
+            bottom, text="←  Retour à l'accueil", font=self.f_nav,
+            fg_color="transparent", text_color=COLORS["muted"],
+            hover_color=COLORS["panel_2"], anchor="w",
+            command=self.close_window
+        ).pack(fill="x")
+
+    def build_nav_item(self, parent, key, label, icon):
+
+        row = ctk.CTkFrame(parent, fg_color=COLORS["panel"], corner_radius=10, height=42)
+        row.pack(fill="x", pady=3)
+        row.pack_propagate(False)
+
+        inner = ctk.CTkFrame(row, fg_color="transparent")
+        inner.pack(fill="both", expand=True, padx=12)
+
+        icon_lbl = ctk.CTkLabel(
+            inner, text=icon, font=self.f_nav, width=22,
+            text_color=COLORS["accent"], fg_color="transparent"
+        )
+        icon_lbl.pack(side="left", pady=9)
+
+        text_lbl = ctk.CTkLabel(
+            inner, text=label, font=self.f_nav,
+            text_color=COLORS["text"], fg_color="transparent", anchor="w"
+        )
+        text_lbl.pack(side="left", fill="x", expand=True, pady=9)
+
+        self.nav_frames[key] = {"row": row, "icon": icon_lbl, "text": text_lbl}
+
+        def click(event=None, k=key):
+            self.on_nav_click(k)
+
+        for widget in (row, inner, icon_lbl, text_lbl):
+            widget.bind("<Button-1>", click)
+            widget.configure(cursor="hand2")
+
+    def on_nav_click(self, key):
+
+        self.active_nav = key
+        self.update_nav_highlight()
+
+        if key != "dashboard":
+            messagebox.showinfo(
+                "Module à venir",
+                "Cette section n'est pas encore disponible.",
+                parent=self.root
+            )
+
+    def update_nav_highlight(self):
+
+        for key, refs in self.nav_frames.items():
+            active = (key == self.active_nav)
+            bg = COLORS.get("accent_soft", "#e7effa") if active else COLORS["panel"]
+            refs["row"].configure(fg_color=bg)
+            refs["icon"].configure(fg_color="transparent")
+            refs["text"].configure(
+                fg_color="transparent",
+                text_color=COLORS["accent"] if active else COLORS["text"]
+            )
+
+    def close_window(self):
+        self.root.destroy()
 
     # =============================================================
     # HEADER
@@ -163,493 +233,232 @@ class Dashboard:
 
     def build_header(self):
 
-        header = tk.Frame(
-            self.content,
-            bg=COLORS["bg"]
-        )
+        header = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 20))
 
-        header.pack(
-            fill="x",
-            padx=30,
-            pady=(38, 0)
-        )
+        left = ctk.CTkFrame(header, fg_color="transparent")
+        left.pack(side="left")
 
-        left = tk.Frame(
-            header,
-            bg=COLORS["bg"]
-        )
+        ctk.CTkLabel(
+            left, text="Registre des contrôles", font=self.f_title,
+            text_color=COLORS["text"], fg_color="transparent"
+        ).pack(anchor="w")
 
-        left.pack(
-            side="left"
-        )
+        ctk.CTkLabel(
+            left, text="Revenue Assurance — Facturation postpaid", font=self.f_subtitle,
+            text_color=COLORS["muted"], fg_color="transparent"
+        ).pack(anchor="w", pady=(4, 0))
 
-        tk.Label(
-            left,
-            text="Registre des contrôles",
-            font=("Georgia", 28, "bold"),
-            bg=COLORS["bg"],
-            fg=COLORS["text"]
-        ).pack(
-            anchor="w"
-        )
+        right = ctk.CTkFrame(header, fg_color="transparent")
+        right.pack(side="right", anchor="n")
 
-        tk.Label(
-            left,
-            text="Revenue Assurance — Facturation postpaid",
-            font=("Segoe UI", 15),
-            bg=COLORS["bg"],
-            fg="#9297a1"
-        ).pack(
-            anchor="w",
-            pady=(5, 0)
+        self.meta = ctk.CTkLabel(
+            right, text="", justify="right", font=self.f_meta,
+            text_color=COLORS["muted"], fg_color="transparent"
         )
+        self.meta.pack(anchor="e")
 
-        # ---------------------------------------------------------
-        # Partie droite
-        # ---------------------------------------------------------
-
-        right = tk.Frame(
-            header,
-            bg=COLORS["bg"]
-        )
-
-        right.pack(
-            side="right",
-            anchor="n"
-        )
-
-        self.meta = tk.Label(
-            right,
-            text="",
-            justify="right",
-            font=("Consolas", 9),
-            bg=COLORS["bg"],
-            fg="#777d88"
-        )
-
-        self.meta.pack(
-            anchor="e"
-        )
-
-        self.refresh_button = tk.Button(
-            right,
-            text="↻ Actualiser",
-            command=self.refresh,
-            font=("Segoe UI", 9),
-            bg=COLORS["panel_2"],
-            fg="#c7cbd2",
-            activebackground=COLORS["border"],
-            activeforeground="white",
-            relief="flat",
-            padx=12,
-            pady=6,
-            cursor="hand2"
-        )
-
-        self.refresh_button.pack(
-            anchor="e",
-            pady=(12, 0)
-        )
+        ctk.CTkButton(
+            right, text="↻ Actualiser", font=self.f_pill, command=self.refresh,
+            fg_color=COLORS["accent"], hover_color=COLORS["accent"],
+            text_color=COLORS["white"], corner_radius=18, height=34, width=130
+        ).pack(anchor="e", pady=(10, 0))
 
     # =============================================================
-    # SEPARATOR
-    # =============================================================
-
-    def build_separator(self):
-
-        tk.Frame(
-            self.content,
-            bg="#c8c8c8",
-            height=1
-        ).pack(
-            fill="x",
-            padx=30,
-            pady=(25, 18)
-        )
-
-    # =============================================================
-    # STATISTIQUES
+    # STATISTIQUES (KPI avec barre de couleur)
     # =============================================================
 
     def build_statistics(self):
 
-        self.stats = tk.Frame(
-            self.content,
-            bg=COLORS["bg"]
-        )
+        self.stats = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        self.stats.pack(fill="x", pady=(0, 20))
 
-        self.stats.pack(
-            fill="x",
-            padx=30
-        )
+        for i in range(4):
+            self.stats.grid_columnconfigure(i, weight=1)
 
     def render_stats(self):
 
         for widget in self.stats.winfo_children():
             widget.destroy()
 
-        counts = self.service.counters(
-            self.cards
-        )
+        counts = self.service.counters(self.cards)
 
         values = [
-            (
-                counts["total"],
-                "Contrôles suivis",
-                None
-            ),
-            (
-                counts["critical"],
-                "En statut critique",
-                "CRITIQUE"
-            ),
-            (
-                counts["attention"],
-                "En attention",
-                "ATTENTION"
-            ),
-            (
-                counts["ok"],
-                "Sans anomalie",
-                "OK"
-            )
+            (counts["total"], "Contrôles suivis", COLORS["accent"]),
+            (counts["critical"], "En statut critique", COLORS["critical"]),
+            (counts["attention"], "En attention", COLORS["attention"]),
+            (counts["ok"], "Sans anomalie", COLORS["ok"]),
         ]
 
-        for value, title, status in values:
+        for i, (value, title, color) in enumerate(values):
 
-            card = StatCard(
-                self.stats,
-                value,
-                title,
-                status
+            card = ctk.CTkFrame(
+                self.stats, fg_color=COLORS["panel"], corner_radius=14,
+                border_width=1, border_color=COLORS["border"]
             )
+            card.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 8, 0))
 
-            card.pack(
-                side="left",
-                fill="x",
-                expand=True,
-                padx=(0, 1)
-            )
+            ctk.CTkLabel(
+                card, text=title, font=self.f_kpi_label,
+                text_color=COLORS["muted"], fg_color="transparent"
+            ).pack(anchor="w", padx=18, pady=(16, 4))
+
+            ctk.CTkLabel(
+                card, text=str(value), font=self.f_kpi_value,
+                text_color=COLORS["text"], fg_color="transparent"
+            ).pack(anchor="w", padx=18, pady=(0, 10))
+
+            ctk.CTkFrame(
+                card, fg_color=color, height=3, corner_radius=2
+            ).pack(fill="x", padx=18, pady=(0, 16))
 
     # =============================================================
-    # TOOLBAR
+    # TOOLBAR (Date / Perimetre / Mode / Familles)
     # =============================================================
 
     def build_toolbar(self):
 
-        toolbar = tk.Frame(
-            self.content,
-            bg=COLORS["bg"]
+        row1 = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        row1.pack(fill="x", pady=(0, 14))
+
+        # ---- Date + Charger ----
+        ctk.CTkLabel(
+            row1, text="Exécution :", font=self.f_label,
+            text_color=COLORS["muted"], fg_color="transparent"
+        ).pack(side="left", padx=(0, 8))
+
+        self.date_entry = ctk.CTkEntry(
+            row1, textvariable=self.date_var, width=130, height=34,
+            placeholder_text="AAAA-MM-JJ", corner_radius=17,
+            fg_color=COLORS["panel_2"], border_color=COLORS["border"],
+            text_color=COLORS["text"]
         )
+        self.date_entry.pack(side="left", padx=(0, 8))
 
-        toolbar.pack(
-            fill="x",
-            padx=30,
-            pady=(30, 20)
+        ctk.CTkButton(
+            row1, text="Charger", font=self.f_pill, command=self.load_selected_date,
+            fg_color=COLORS["panel_2"], hover_color=COLORS["border"],
+            text_color=COLORS["text"], corner_radius=17, height=34, width=90
+        ).pack(side="left", padx=(0, 24))
+
+        # ---- Perimetre ----
+        ctk.CTkLabel(
+            row1, text="Périmètre", font=self.f_label,
+            text_color=COLORS["text"], fg_color="transparent"
+        ).pack(side="left", padx=(0, 10))
+
+        self.perimetre_selector = ctk.CTkSegmentedButton(
+            row1, values=["Toutes", "FXL", "HYB"],
+            variable=self.perimetre_var, command=lambda v: self.on_filter_changed(),
+            font=self.f_pill, corner_radius=17, height=34,
+            fg_color=COLORS["panel_2"], selected_color=COLORS["accent"],
+            selected_hover_color=COLORS["accent"], unselected_color=COLORS["panel_2"],
+            unselected_hover_color=COLORS["border"], text_color=COLORS["text"],
         )
+        self.perimetre_selector.pack(side="left", padx=(0, 24))
 
-        # =========================================================
-        # PERIMETRE
-        # =========================================================
+        # ---- Mode d'execution ----
+        ctk.CTkLabel(
+            row1, text="Exécution", font=self.f_label,
+            text_color=COLORS["text"], fg_color="transparent"
+        ).pack(side="left", padx=(0, 10))
 
-        scope_frame = tk.Frame(
-            self.content,
-            bg=COLORS["bg"]
+        self.mode_selector = ctk.CTkSegmentedButton(
+            row1, values=["COMMIT", "SIMULATION"],
+            variable=self.mode_var, command=lambda v: self.on_filter_changed(),
+            font=self.f_pill, corner_radius=17, height=34,
+            fg_color=COLORS["panel_2"], selected_color=COLORS["accent"],
+            selected_hover_color=COLORS["accent"], unselected_color=COLORS["panel_2"],
+            unselected_hover_color=COLORS["border"], text_color=COLORS["text"],
         )
+        self.mode_selector.pack(side="left")
 
-        scope_frame.pack(
-            fill="x",
-            padx=30,
-            pady=(25, 5)
+        # ---- Familles (2e ligne) ----
+        row2 = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        row2.pack(fill="x", pady=(0, 10))
+
+        family_values = ["Toutes les familles"] + list(FAMILIES.values())
+
+        self.family_selector = ctk.CTkSegmentedButton(
+            row2, values=family_values,
+            variable=self.family_var, command=lambda v: self.render_cards(),
+            font=self.f_pill, corner_radius=17, height=34,
+            fg_color=COLORS["panel_2"], selected_color=COLORS["accent"],
+            selected_hover_color=COLORS["accent"], unselected_color=COLORS["panel_2"],
+            unselected_hover_color=COLORS["border"], text_color=COLORS["text"],
         )
-
-        tk.Label(
-            scope_frame,
-            text="Périmètre",
-            font=("Segoe UI", 13, "bold"),
-            bg=COLORS["bg"],
-            fg=COLORS["text"]
-        ).pack(
-            side="left",
-            padx=(0, 12)
-        )
-
-        self.fxl_button = self.create_filter_button(
-            scope_frame,
-            "FXL",
-            self.perimetre_var,
-            "FXL",
-            self.on_filter_changed
-        )
-
-        self.hyb_button = self.create_filter_button(
-            scope_frame,
-            "HYB",
-            self.perimetre_var,
-            "HYB",
-            self.on_filter_changed
-        )
-
-        # =========================================================
-        # MODE EXECUTION
-        # =========================================================
-
-        mode_frame = tk.Frame(
-            self.content,
-            bg=COLORS["bg"]
-        )
-
-        mode_frame.pack(
-            fill="x",
-            padx=30,
-            pady=(5, 15)
-        )
-
-        tk.Label(
-            mode_frame,
-            text="Exécution",
-            font=("Segoe UI", 13, "bold"),
-            bg=COLORS["bg"],
-            fg=COLORS["text"]
-        ).pack(
-            side="left",
-            padx=(0, 12)
-        )
-
-        self.commit_button = self.create_filter_button(
-            mode_frame,
-            "●  COMMIT",
-            self.mode_var,
-            "COMMIT",
-            self.on_filter_changed
-        )
-
-        self.simulation_button = self.create_filter_button(
-            mode_frame,
-            "SIMULATION",
-            self.mode_var,
-            "SIMULATION",
-            self.on_filter_changed
-        )
-
-        # ---------------------------------------------------------
-        # Date
-        # ---------------------------------------------------------
-
-        tk.Label(
-            toolbar,
-            text="Exécution :",
-            font=("Segoe UI", 14),
-            bg=COLORS["bg"],
-            fg="#777d88"
-        ).pack(
-            side="left",
-            padx=(0, 7)
-        )
-
-        self.date_entry = tk.Entry(
-            toolbar,
-            textvariable=self.date_var,
-            width=13,
-            font=("Consolas", 13),
-            bg=COLORS["panel_2"],
-            fg="#d9dce2",
-            insertbackground="white",
-            relief="flat"
-        )
-
-        self.date_entry.pack(
-            side="left",
-            padx=(0, 15),
-            ipady=6
-        )
-
-        tk.Button(
-            toolbar,
-            text="Charger",
-            command=self.load_selected_date,
-            font=("Segoe UI", 9),
-            bg=COLORS["panel_2"],
-            fg="#c7cbd2",
-            activebackground=COLORS["border"],
-            activeforeground="white",
-            relief="flat",
-            padx=10,
-            pady=5
-        ).pack(
-            side="left",
-            padx=(0, 20)
-        )
-
-        # ---------------------------------------------------------
-        # Familles -- sur sa PROPRE ligne, sous le toolbar date/charger
-        # (evite le debordement horizontal quand la fenetre est etroite)
-        # ---------------------------------------------------------
-
-        family_frame = tk.Frame(
-            self.content,
-            bg=COLORS["bg"]
-        )
-
-        family_frame.pack(
-            fill="x",
-            padx=30,
-            pady=(0, 15)
-        )
-
-        tk.Label(
-            family_frame,
-            text="Filtrer :",
-            font=("Segoe UI", 14),
-            bg=COLORS["bg"],
-            fg="#777d88"
-        ).pack(
-            side="left",
-            padx=(0, 8)
-        )
-
-        options = [
-            ("Toutes les familles", "Toutes les familles")
-        ]
-
-        options += [
-            (display, display)
-            for display in FAMILIES.values()
-        ]
-
-        for text, value in options:
-
-            tk.Radiobutton(
-                family_frame,
-                text=text,
-                variable=self.family_var,
-                value=value,
-                command=self.render_cards,
-                indicatoron=False,
-                font=("Segoe UI", 14),
-                bg=COLORS["panel_2"],
-                fg="#899dcd",
-                selectcolor=COLORS["muted"],
-                activebackground=COLORS["ok"],
-                activeforeground=COLORS["white"],
-                relief="flat",
-                padx=11,
-                pady=6,
-                cursor="hand2"
-            ).pack(
-                side="left",
-                padx=(0, 5)
-            )
+        self.family_selector.pack(side="left")
 
     # =============================================================
-    # CHARGEMENT
+    # CHARGEMENT (logique inchangee)
     # =============================================================
 
     def refreshOld(self):
 
         try:
-
             latest = self.repository.get_latest_date()
-
             self.selected_date = latest
 
             if latest:
-
-                self.date_var.set(
-                    latest.strftime("%Y-%m-%d")
-                )
+                self.date_var.set(latest.strftime("%Y-%m-%d"))
 
             self.load_cards()
 
         except Exception as exc:
-
-            messagebox.showerror(
-                "Erreur",
-                f"Impossible de charger les données.\n\n{exc}"
-            )
+            messagebox.showerror("Erreur", f"Impossible de charger les données.\n\n{exc}")
 
     def refresh(self):
 
         try:
-
             latest = self.repository.get_latest_date(
                 self.perimetre_var.get(),
                 self.mode_var.get()
             )
-
             self.selected_date = latest
 
             if latest:
-                self.date_var.set(
-                    latest.strftime("%Y-%m-%d")
-                )
+                self.date_var.set(latest.strftime("%Y-%m-%d"))
 
             self.load_cards()
 
         except Exception as exc:
-
-            messagebox.showerror(
-                "Erreur",
-                f"Impossible de charger les données.\n\n{exc}"
-            )
+            messagebox.showerror("Erreur", f"Impossible de charger les données.\n\n{exc}")
 
     def load_selected_date(self):
 
         try:
-
             value = self.date_var.get().strip()
 
             if not value:
                 self.refresh()
                 return
 
-            selected = datetime.strptime(
-                value,
-                "%Y-%m-%d"
-            ).date()
-
+            selected = datetime.strptime(value, "%Y-%m-%d").date()
             self.selected_date = selected
-
             self.load_cards()
 
         except ValueError:
-
-            messagebox.showwarning(
-                "Date invalide",
-                "Format attendu : YYYY-MM-DD"
-            )
+            messagebox.showwarning("Date invalide", "Format attendu : YYYY-MM-DD")
 
     def load_cardsOld(self):
 
-        self.cards = self.service.load_cards(
-            self.selected_date
-        )
+        self.cards = self.service.load_cards(self.selected_date)
 
         date_text = (
-            self.selected_date.strftime(
-                "%d/%m/%Y"
-            )
-            if self.selected_date
-            else "—"
+            self.selected_date.strftime("%d/%m/%Y")
+            if self.selected_date else "—"
         )
+        environment = "démo" if self.demo else "production"
 
-        environment = (
-            "démo"
-            if self.demo
-            else "production"
-        )
-
-        self.meta.config(
-            text=
-            f"Dernière exécution : {date_text}\n"
-            f"Environnement : {environment}"
+        self.meta.configure(
+            text=f"Dernière exécution : {date_text}\nEnvironnement : {environment}"
         )
 
         self.render_stats()
-
         self.render_cards()
 
     def load_cards(self):
+
         self.cards = self.service.load_cards(
             self.selected_date,
             self.perimetre_var.get(),
@@ -658,24 +467,17 @@ class Dashboard:
 
         date_text = (
             self.selected_date.strftime("%d/%m/%Y")
-            if self.selected_date
-            else "—"
+            if self.selected_date else "—"
         )
+        environment = "démo" if self.demo else "production"
 
-        environment = (
-            "démo"
-            if self.demo
-            else "production"
-        )
-
-        self.meta.config(
+        self.meta.configure(
             text=(
                 f"Dernière exécution : {date_text}\n"
                 f"Environnement : {environment}\n"
                 f"Périmètre : {self.perimetre_var.get()}\n"
                 f"Mode : {self.mode_var.get()}"
-            ),
-            font=("Georgia", 14),
+            )
         )
 
         self.render_stats()
@@ -694,94 +496,91 @@ class Dashboard:
 
         for family, display_name in FAMILIES.items():
 
-            if (
-                selected != "Toutes les familles"
-                and selected != display_name
-            ):
+            if selected != "Toutes les familles" and selected != display_name:
                 continue
 
-            cards = [
-                card
-                for card in self.cards
-                if card.famille == family
-            ]
+            cards = [c for c in self.cards if c.famille == family]
 
             if not cards:
                 continue
 
-            # -----------------------------------------------------
-            # Titre famille
-            # -----------------------------------------------------
+            title_row = ctk.CTkFrame(self.sections, fg_color="transparent")
+            title_row.pack(fill="x", pady=(14, 8))
 
-            title = tk.Frame(
-                self.sections,
-                bg=COLORS["bg"]
-            )
+            ctk.CTkLabel(
+                title_row, text=display_name, font=self.f_section,
+                text_color=COLORS["text"], fg_color="transparent"
+            ).pack(side="left")
 
-            title.pack(
-                fill="x",
-                pady=(12, 7)
-            )
+            grid = ctk.CTkFrame(self.sections, fg_color="transparent")
+            grid.pack(fill="x", pady=(0, 10))
 
-            tk.Label(
-                title,
-                text=display_name,
-                font=("Georgia", 16, "bold"),
-                bg=COLORS["bg"],
-                fg=COLORS["text"]
-            ).pack(
-                side="left"
-            )
-
-            tk.Frame(
-                title,
-                bg=COLORS["border"],
-                height=1
-            ).pack(
-                side="left",
-                fill="x",
-                expand=True,
-                padx=(15, 0),
-                pady=5
-            )
-
-            # -----------------------------------------------------
-            # Grid
-            # -----------------------------------------------------
-
-            grid = tk.Frame(
-                self.sections,
-                bg=COLORS["bg"]
-            )
-
-            grid.pack(
-                fill="x",
-                pady=(0, 18)
-            )
-
-            for column in range(3):
-
-                grid.grid_columnconfigure(
-                    column,
-                    weight=1,
-                    uniform="control"
-                )
+            for column in range(4):
+                grid.grid_columnconfigure(column, weight=1, uniform="control")
 
             for index, card in enumerate(cards):
+                widget = self.build_control_card(grid, card)
+                widget.grid(row=index // 4, column=index % 4, sticky="nsew", padx=5, pady=5)
 
-                widget = ControlCard(
-                    grid,
-                    card,
-                    self.open_detail
-                )
+    def build_control_card(self, parent, card):
 
-                widget.grid(
-                    row=index // 3,
-                    column=index % 3,
-                    sticky="nsew",
-                    padx=4,
-                    pady=4
-                )
+        severite = card.severite or "N/A"
+        color, bg = SEVERITY_COLORS.get(severite, SEVERITY_COLORS["N/A"])
+
+        frame = ctk.CTkFrame(
+            parent, fg_color=COLORS["panel"], corner_radius=14,
+            border_width=1, border_color=COLORS["border"], cursor="hand2"
+        )
+
+        top = ctk.CTkFrame(frame, fg_color="transparent")
+        top.pack(fill="x", padx=16, pady=(14, 0))
+
+        ctk.CTkLabel(
+            top, text=f"CTRL-{card.control_id:02d}", font=self.f_card_id,
+            text_color=COLORS["muted"], fg_color="transparent"
+        ).pack(side="left")
+
+        badge = ctk.CTkLabel(
+            top, text=severite, font=self.f_card_badge,
+            text_color=color, fg_color=bg, corner_radius=10,
+            width=1, height=20
+        )
+        badge.pack(side="right", ipadx=8)
+
+        ctk.CTkLabel(
+            frame, text=card.control_name, font=self.f_card_name,
+            text_color=COLORS["text"], fg_color="transparent",
+            anchor="w", justify="left", wraplength=200
+        ).pack(fill="x", padx=16, pady=(10, 12))
+
+        bottom = ctk.CTkFrame(frame, fg_color="transparent")
+        bottom.pack(fill="x", padx=16, pady=(0, 14))
+
+        ctk.CTkLabel(
+            bottom, text=str(card.nb_items), font=self.f_card_value,
+            text_color=COLORS["text"], fg_color="transparent"
+        ).pack(side="left")
+
+        caption = ctk.CTkFrame(bottom, fg_color="transparent")
+        caption.pack(side="right", anchor="s")
+
+        ctk.CTkLabel(
+            caption, text="éléments détectés", font=self.f_card_caption,
+            text_color=COLORS["muted"], fg_color="transparent"
+        ).pack(anchor="e")
+
+        ctk.CTkLabel(
+            caption, text=card.frequence, font=self.f_card_caption,
+            text_color=COLORS["muted"], fg_color="transparent"
+        ).pack(anchor="e")
+
+        def click(event=None, c=card):
+            self.open_detail(c)
+
+        for widget in (frame, top, bottom):
+            widget.bind("<Button-1>", click)
+
+        return frame
 
     # =============================================================
     # DETAIL
@@ -798,62 +597,11 @@ class Dashboard:
         )
 
     # =============================================================
-    # SCROLL
+    # FILTRES
     # =============================================================
 
-    def on_mousewheel(self, event):
-
-        self.canvas.yview_scroll(
-            int(-event.delta / 120),
-            "units"
-        )
-    def create_filter_button(self,parent,text,variable,value,command):
-
-        button = tk.Radiobutton(
-            parent,
-
-            text=text,
-
-            variable=variable,
-
-            value=value,
-
-            indicatoron=False,
-
-            font=("Segoe UI", 9, "bold"),
-
-            bg=COLORS["panel_2"],
-
-            fg="white",
-
-            selectcolor=COLORS["accent"],
-
-            activebackground=COLORS["accent"],
-
-            activeforeground="white",
-
-            relief="flat",
-
-            bd=0,
-
-            padx=18,
-
-            pady=8,
-
-            cursor="hand2",
-
-            command=command
-        )
-
-        button.pack(
-            side="left",
-            padx=(0, 5)
-        )
-
-        return button
-
-
     def on_filter_changed(self):
+
         self.selected_date = None
 
         latest = self.repository.get_latest_date(
@@ -864,30 +612,6 @@ class Dashboard:
         self.selected_date = latest
 
         if latest:
-            self.date_var.set(
-                latest.strftime("%Y-%m-%d")
-            )
+            self.date_var.set(latest.strftime("%Y-%m-%d"))
 
         self.load_cards()
-
-    def on_canvas_resize(self, event):
-
-        canvas_width = event.width
-
-        # Largeur maximale du dashboard
-        max_width = 1650
-        margin = 20  # px de marge totale (10px de chaque cote)
-
-        content_width = max(canvas_width - margin, 400)
-
-        self.canvas.itemconfigure(
-            self.content_window,
-            width=content_width
-        )
-
-        # Centrage horizontal
-        self.canvas.coords(
-            self.content_window,
-            canvas_width / 2,
-            0
-        )
