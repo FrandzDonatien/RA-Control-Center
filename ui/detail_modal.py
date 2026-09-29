@@ -1,5 +1,7 @@
+import os
+import re
 import tkinter as tk
-from tkinter import ttk
+from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 
@@ -21,6 +23,10 @@ class DetailModal(ctk.CTkToplevel):
         self.repository = repository
         self.perimetre = perimetre
         self.mode_execution = mode_execution
+
+        self.rows = []
+        self.columns = []
+        self.visible_values = []   # lignes actuellement affichées (pour l'export)
 
         self.title(f"CTRL-{card.control_id:02d} — {card.control_name}")
         self.configure(fg_color=COLORS["bg"])
@@ -227,9 +233,18 @@ class DetailModal(ctk.CTkToplevel):
         )
         self.count_label.pack(anchor="w")
 
+        # bouton d'export Excel (à droite, avant la recherche)
+        self.export_btn = ctk.CTkButton(
+            thead, text="Exporter Excel", font=self.f_btn,
+            command=self.export_excel,
+            fg_color=COLORS["accent"], hover_color=COLORS["accent"],
+            text_color="#FFFFFF", corner_radius=10, height=38, width=130
+        )
+        self.export_btn.pack(side="right", padx=(10, 0))
+
         search = ctk.CTkFrame(
             thead, fg_color=COLORS["panel"], corner_radius=10,
-            border_width=1, border_color=COLORS["border"], width=300, height=38
+            border_width=1, border_color=COLORS["border"], width=260, height=38
         )
         search.pack(side="right")
         search.pack_propagate(False)
@@ -285,7 +300,7 @@ class DetailModal(ctk.CTkToplevel):
         # ---------------------------------------------------------
 
         trend_card = ctk.CTkFrame(
-            body, fg_color=COLORS["panel"], corner_radius=16,
+            body, fg_color="#FFFFFF", corner_radius=16,
             border_width=1, border_color=COLORS["border"], width=390
         )
         trend_card.pack(side="right", fill="y", padx=(8, 0))
@@ -320,8 +335,12 @@ class DetailModal(ctk.CTkToplevel):
 
         ctk.CTkFrame(trend_card, fg_color=COLORS["border"], height=1).pack(fill="x")
 
-        self.chart = TrendChart(trend_card, height=220)
-        self.chart.pack(fill="both", expand=True, padx=12, pady=12)
+        # conteneur blanc : le graphique remplit tout l'espace disponible
+        chart_box = ctk.CTkFrame(trend_card, fg_color="#FFFFFF", corner_radius=0)
+        chart_box.pack(fill="both", expand=True, padx=8, pady=(8, 12))
+
+        self.chart = TrendChart(chart_box, height=260)
+        self.chart.pack(fill="both", expand=True)
 
     # =============================================================
     # SUMMARY CARD
@@ -458,6 +477,7 @@ class DetailModal(ctk.CTkToplevel):
         for item in self.tree.get_children():
             self.tree.delete(item)
 
+        self.visible_values = []
         shown = 0
 
         for row in self.rows:
@@ -489,8 +509,132 @@ class DetailModal(ctk.CTkToplevel):
                 values=values,
                 tags=("odd" if shown % 2 else "even",)
             )
+            self.visible_values.append(values)
             shown += 1
 
         self.count_label.configure(
             text=f"{shown} sur {len(self.rows)} éléments — dernière exécution"
         )
+
+    # =============================================================
+    # EXPORT EXCEL
+    # =============================================================
+
+    def _default_filename(self):
+        name = re.sub(r"[^\w\-]+", "_", str(self.card.control_name)).strip("_")
+        date = str(self.card.date_controle or "")[:10]
+        parts = [f"CTRL-{self.card.control_id:02d}", name]
+        if date:
+            parts.append(date)
+        return "_".join(p for p in parts if p) + ".xlsx"
+
+    @staticmethod
+    def _excel_value(value):
+        """Convertit les valeurs non supportées par Excel (dict, list, etc.)."""
+        if value is None or isinstance(value, (int, float, bool, str)):
+            return value
+        if hasattr(value, "isoformat"):          # date / datetime
+            return value
+        if hasattr(value, "__float__"):          # Decimal
+            try:
+                return float(value)
+            except Exception:
+                pass
+        return str(value)
+
+    def export_excel(self):
+
+        if not self.visible_values:
+            messagebox.showinfo(
+                "Export Excel", "Aucune ligne à exporter.", parent=self
+            )
+            return
+
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+            from openpyxl.utils import get_column_letter
+        except ImportError:
+            messagebox.showerror(
+                "Export Excel",
+                "La bibliothèque openpyxl est requise.\n\n"
+                "Installez-la avec :\n    pip install openpyxl",
+                parent=self
+            )
+            return
+
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Exporter vers Excel",
+            defaultextension=".xlsx",
+            initialfile=self._default_filename(),
+            filetypes=[("Classeur Excel", "*.xlsx")]
+        )
+
+        if not path:
+            return
+
+        try:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Détails"
+
+            headers = [c.replace("_", " ").upper() for c in self.columns]
+
+            head_fill = PatternFill("solid", fgColor="2F5FE0")
+            head_font = Font(bold=True, color="FFFFFF", name="Calibri", size=11)
+            thin = Side(style="thin", color="E3E6EA")
+            border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+            ws.append(headers)
+            for cell in ws[1]:
+                cell.fill = head_fill
+                cell.font = head_font
+                cell.alignment = Alignment(horizontal="left", vertical="center")
+                cell.border = border
+            ws.row_dimensions[1].height = 24
+
+            for values in self.visible_values:
+                ws.append([self._excel_value(v) for v in values])
+
+            band = PatternFill("solid", fgColor="F7F8FA")
+            for r_idx, row in enumerate(ws.iter_rows(min_row=2), start=0):
+                for cell in row:
+                    cell.border = border
+                    cell.alignment = Alignment(vertical="center")
+                    if r_idx % 2:
+                        cell.fill = band
+
+            # largeur automatique (bornée)
+            for idx, header in enumerate(headers, start=1):
+                longest = len(str(header))
+                for row in self.visible_values:
+                    longest = max(longest, len(str(row[idx - 1])))
+                ws.column_dimensions[get_column_letter(idx)].width = min(max(longest + 3, 12), 50)
+
+            ws.freeze_panes = "A2"
+            ws.auto_filter.ref = ws.dimensions
+
+            wb.save(path)
+
+        except PermissionError:
+            messagebox.showerror(
+                "Export Excel",
+                "Impossible d'écrire le fichier : il est peut-être ouvert dans Excel.\n"
+                "Fermez-le puis réessayez.",
+                parent=self
+            )
+            return
+        except Exception as e:
+            messagebox.showerror("Export Excel", f"Échec de l'export :\n{e}", parent=self)
+            return
+
+        if messagebox.askyesno(
+            "Export Excel",
+            f"{len(self.visible_values)} ligne(s) exportée(s).\n\nOuvrir le fichier ?",
+            parent=self
+        ):
+            try:
+                os.startfile(path)      # Windows
+            except Exception:
+                pass

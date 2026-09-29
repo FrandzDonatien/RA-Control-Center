@@ -1,2 +1,8 @@
-psycopg2-binary>=2.9
-python-dotenv>=1.0
+customtkinter==6.0.0
+darkdetect==0.8.0
+et_xmlfile==2.0.0
+openpyxl==3.1.5
+packaging==26.3
+pillow==12.3.0
+psycopg2-binary==2.9.13
+python-dotenv==1.2.3
