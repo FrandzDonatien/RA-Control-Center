@@ -1,49 +1,210 @@
+import os
+import tkinter as tk
 from tkinter import messagebox
 
 import customtkinter as ctk
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps, ImageTk
 
 ctk.set_appearance_mode("light")
 ctk.set_widget_scaling(1.0)
 
 
 # =====================================================================
-# PALETTE (inspirée de TailAdmin)
+# PALETTE
 # =====================================================================
 
 PALETTE = {
-    "bg":          "#F9FAFB",   # fond de page
-    "surface":     "#FFFFFF",   # blanc TailAdmin (sidebar, header, cartes)
-    "border":      "#E4E7EC",
-    "text":        "#1D2939",
-    "text_soft":   "#344054",
-    "muted":       "#667085",
-    "brand":       "#465FFF",
-    "brand_soft":  "#ECF3FF",
-    "hover":       "#F2F4F7",
-    "success":     "#12B76A",
-    "success_bg":  "#ECFDF3",
-    "success_txt": "#027A48",
-    "neutral_bg":  "#F2F4F7",
+    "bg":          "#F7F8FA",
+    "surface":     "#FFFFFF",
+    "border":      "#E3E6EA",
+    "text":        "#16181D",
+    "text_soft":   "#4A4F58",
+    "muted":       "#7B818C",
+    "accent":      "#2F5FE0",
+    "accent_soft": "#EEF2FD",
+    "hero_dark":   "#0E1A2B",
 }
 
 FONT = "Segoe UI"
+SERIF = "Georgia"
 
 
 # =====================================================================
-# ICONES (dessinées avec Pillow, sans emoji ni police externe)
+# EMPLACEMENT DES IMAGES
+# =====================================================================
+# Toutes les images sont des fichiers locaux, à déposer vous-même dans
+# ce dossier. Rien n'est téléchargé ni généré : si un fichier manque,
+# un simple bloc neutre l'indique à la place -- jamais d'illustration
+# dessinée en remplacement.
+#
+# Résolutions minimales conseillées pour éviter tout flou à l'écran :
+#   - hero.jpg          : au moins 1600 x 500 px (bannière très large)
+#   - modules/<clé>.jpg : au moins 640 x 360 px  (ratio ~16:9)
+
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+MODULES_DIR = os.path.join(ASSETS_DIR, "modules")
+
+HERO_IMAGE_PATH = os.path.join(ASSETS_DIR, "hero.jpg")
+
+MODULE_IMAGE_FILES = {
+    "fixe":         "fixe.jpg",
+    "ftth":         "ftth.jpg",
+    "interconnect": "interconnect.jpg",
+    "simbox":       "simbox.jpg",
+    "a2p_p2a":      "a2p_p2a.jpg",
+    "franchise":    "franchise.jpg",
+}
+
+
+# =====================================================================
+# CHARGEMENT D'IMAGE HAUTE QUALITE ("cover", comme le CSS background-size)
+# =====================================================================
+#
+# La photo source est recadrée pour remplir exactement la zone cible
+# sans être déformée, avec un seul redimensionnement LANCZOS (le filtre
+# le plus fin de Pillow). Si la photo source est plus petite que la zone
+# cible, elle est agrandie -- privilégiez toujours une photo plus grande
+# que nécessaire plutôt que plus petite.
+
+_IMAGE_CACHE = {}
+
+
+def _round_top_mask(w, h, radius):
+    """
+    Masque niveau de gris : coins hauts arrondis, coins bas carrés.
+    Le rectangle arrondi dépasse la hauteur visible de `radius` en bas,
+    ce qui pousse l'arrondi du bas hors du masque -- il ne reste donc
+    que les deux coins du haut arrondis.
+    """
+    mask = Image.new("L", (w, h), 0)
+    d = ImageDraw.Draw(mask)
+    d.rounded_rectangle((0, 0, w - 1, h - 1 + radius), radius=radius, fill=255)
+    return mask
+
+
+def _load_cover(path, target_w, target_h, round_top_radius=0):
+
+    key = (path, target_w, target_h, round_top_radius)
+    if key in _IMAGE_CACHE:
+        return _IMAGE_CACHE[key]
+
+    if not os.path.isfile(path):
+        _IMAGE_CACHE[key] = None
+        return None
+
+    try:
+        with Image.open(path) as raw:
+            img = ImageOps.exif_transpose(raw)  # respecte l'orientation d'origine
+            img = img.convert("RGB")
+
+            src_w, src_h = img.size
+            scale = max(target_w / src_w, target_h / src_h)
+            new_w = max(1, round(src_w * scale))
+            new_h = max(1, round(src_h * scale))
+
+            resized = img.resize((new_w, new_h), Image.LANCZOS)
+
+            left = (new_w - target_w) // 2
+            top = (new_h - target_h) // 2
+            cropped = resized.crop((left, top, left + target_w, top + target_h))
+
+        if round_top_radius > 0:
+            # transparence réelle sur les coins hauts -- pas de couleur
+            # plaquée, pas de cadre carré posé par-dessus
+            rgba = cropped.convert("RGBA")
+            rgba.putalpha(_round_top_mask(target_w, target_h, round_top_radius))
+            final = rgba
+        else:
+            final = cropped
+
+        result = ctk.CTkImage(light_image=final, size=(target_w, target_h))
+
+    except Exception:
+        result = None
+
+    _IMAGE_CACHE[key] = result
+    return result
+
+
+def module_image(key, width, height, round_top_radius=0):
+    filename = MODULE_IMAGE_FILES.get(key)
+    if not filename:
+        return None
+    return _load_cover(os.path.join(MODULES_DIR, filename), width, height, round_top_radius)
+
+
+# =====================================================================
+# HERO : photo pleine largeur + dégradé sombre intégré à l'image
+# =====================================================================
+
+_HERO_SOURCE = {"img": None, "loaded": False}
+
+
+def _hero_source():
+    """Charge la photo d'origine une seule fois (évite de relire le disque
+    à chaque redimensionnement de la fenêtre)."""
+    if not _HERO_SOURCE["loaded"]:
+        _HERO_SOURCE["loaded"] = True
+        if os.path.isfile(HERO_IMAGE_PATH):
+            try:
+                with Image.open(HERO_IMAGE_PATH) as raw:
+                    _HERO_SOURCE["img"] = ImageOps.exif_transpose(raw).convert("RGB")
+            except Exception:
+                _HERO_SOURCE["img"] = None
+    return _HERO_SOURCE["img"]
+
+
+def _hero_pil(w, h, focus_y=0.40):
+    """
+    Photo 'cover' pleine largeur + dégradé sombre à gauche (intégré à
+    l'image) pour garder le texte lisible. focus_y : 0 = haut de la photo,
+    1 = bas (0.40 garde bien les sommets des pylônes).
+    """
+    src = _hero_source()
+    if src is None:
+        return None
+
+    try:
+        sw, sh = src.size
+        scale = max(w / sw, h / sh)
+        nw, nh = max(1, round(sw * scale)), max(1, round(sh * scale))
+        img = src.resize((nw, nh), Image.LANCZOS)
+
+        left = (nw - w) // 2
+        top = round((nh - h) * focus_y)
+        img = img.crop((left, top, left + w, top + h))
+
+        # dégradé horizontal : opaque à gauche -> transparent vers 70 %
+        grad_w = max(1, int(w * 0.70))
+        grad = Image.linear_gradient("L").rotate(90, expand=True)   # 0 -> 255 gauche->droite
+        grad = ImageOps.invert(grad).resize((grad_w, h), Image.BILINEAR)
+        grad = grad.point(lambda v: int(v * 0.90))                  # opacité max 90 %
+
+        mask = Image.new("L", (w, h), 0)
+        mask.paste(grad, (0, 0))
+
+        dark = Image.new("RGB", (w, h), PALETTE["hero_dark"])
+        return Image.composite(dark, img, mask)
+
+    except Exception:
+        return None
+
+
+# =====================================================================
+# ICONES D'INTERFACE (dessinées avec Pillow -- uniquement pour les
+# petits pictogrammes de l'UI : loupe, flèche, logo. Jamais utilisées
+# comme substitut de photo.)
 # =====================================================================
 
 _ICON_CACHE = {}
 
 
 def _draw_icon(name, color, size):
-    """Dessine une icône 'outline' (grille 24x24) en haute résolution."""
     S = 16
     N = 24 * S
     img = Image.new("RGBA", (N, N), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    w = int(1.9 * S)
+    w = int(1.8 * S)
 
     def P(*pts):
         return [(x * S, y * S) for x, y in pts]
@@ -51,51 +212,10 @@ def _draw_icon(name, color, size):
     def line(*pts):
         d.line(P(*pts), fill=color, width=w, joint="curve")
         r = w / 2
-        for x, y in P(*pts):          # extrémités arrondies
+        for x, y in P(*pts):
             d.ellipse((x - r, y - r, x + r, y + r), fill=color)
 
-    def rrect(x0, y0, x1, y1, r=2.0):
-        d.rounded_rectangle(
-            (x0 * S, y0 * S, x1 * S, y1 * S), radius=r * S,
-            outline=color, width=w
-        )
-
-    if name == "home":
-        line((3, 11), (12, 3.5), (21, 11))
-        line((5.5, 9.5), (5.5, 20), (18.5, 20), (18.5, 9.5))
-        rrect(10, 14, 14, 20, 1)
-
-    elif name == "chart":
-        line((6, 20), (6, 12))
-        line((12, 20), (12, 5))
-        line((18, 20), (18, 9))
-
-    elif name == "fiber":
-        for r in (4.5, 8.5, 12.5):
-            d.arc(P((12 - r, 19 - r), (12 + r, 19 + r)),
-                  start=225, end=315, fill=color, width=w)
-        d.ellipse(P((10.4, 17.4), (13.6, 20.6)), fill=color)
-
-    elif name == "interconnect":
-        line((4, 8), (20, 8))
-        line((15.5, 3.5), (20, 8), (15.5, 12.5))
-        line((20, 16), (4, 16))
-        line((8.5, 11.5), (4, 16), (8.5, 20.5))
-
-    elif name == "simbox":
-        line((6, 3), (15, 3), (19, 7), (19, 21), (6, 21), (6, 3))
-        rrect(9.5, 11, 15.5, 17, 1.2)
-
-    elif name == "mail":
-        rrect(3, 5, 21, 19, 2.5)
-        line((3.8, 7), (12, 13), (20.2, 7))
-
-    elif name == "store":
-        rrect(3, 4, 21, 9.5, 1.5)
-        line((5, 9.5), (5, 20), (19, 20), (19, 9.5))
-        rrect(10, 14, 14, 20, 0.8)
-
-    elif name == "arrow":
+    if name == "arrow":
         line((5, 12), (19, 12))
         line((13, 6), (19, 12), (13, 18))
 
@@ -103,19 +223,14 @@ def _draw_icon(name, color, size):
         d.ellipse(P((4, 4), (17, 17)), outline=color, width=w)
         line((15.5, 15.5), (20, 20))
 
-    elif name == "bell":
-        d.arc(P((7, 3), (17, 13)), start=180, end=360, fill=color, width=w)
-        line((7, 8), (5, 17), (19, 17), (17, 8))
-        d.arc(P((9.5, 15), (14.5, 22)), start=0, end=180, fill=color, width=w)
-
     elif name == "logo":
-        d.rounded_rectangle((0, 0, N - 1, N - 1), radius=6 * S, fill=color)
-        d2 = (255, 255, 255, 255)
+        d.rounded_rectangle((0, 0, N - 1, N - 1), radius=5 * S, fill=color)
+        white = (255, 255, 255, 255)
         pts = P((7, 12.5), (10.6, 16), (17, 8.5))
-        d.line(pts, fill=d2, width=int(2.4 * S), joint="curve")
+        d.line(pts, fill=white, width=int(2.2 * S), joint="curve")
         for x, y in (pts[0], pts[-1]):
-            r = 1.2 * S
-            d.ellipse((x - r, y - r, x + r, y + r), fill=d2)
+            r = 1.1 * S
+            d.ellipse((x - r, y - r, x + r, y + r), fill=white)
 
     return img.resize((size * 4, size * 4), Image.LANCZOS)
 
@@ -133,28 +248,31 @@ def icon(name, color, size=20):
 # =====================================================================
 
 class ControlCenter(ctk.CTk):
-    # (nom, description, icône, clé)
+    # (nom, description, clé)
     MODULES = [
-        ("FIXE",         "Dashboard Postpaid / Fixe",   "chart",        "fixe"),
-        ("FTTH",         "Contrôles Fibre",             "fiber",        "ftth"),
-        ("INTERCONNECT", "Contrôles Interconnect",      "interconnect", "interconnect"),
-        ("SIMBOX",       "Contrôles SIMBOX",            "simbox",       "simbox"),
-        ("A2P / P2A",    "Messaging Revenue Assurance", "mail",         "a2p_p2a"),
-        ("FRANCHISE",    "Contrôles Franchise",         "store",        "franchise"),
+        ("FIXE",         "Dashboard Postpaid / Fixe",   "fixe"),
+        ("FTTH",         "Contrôles Fibre",             "ftth"),
+        ("INTERCONNECT", "Contrôles Interconnect",      "interconnect"),
+        ("SIMBOX",       "Contrôles SIMBOX",            "simbox"),
+        ("A2P / P2A",    "Messaging Revenue Assurance", "a2p_p2a"),
+        ("FRANCHISE",    "Contrôles Franchise",         "franchise"),
     ]
 
     AVAILABLE = {"fixe"}
+
+    CARD_W = 260
+    CARD_H = 300
+    IMG_H = 140
+
+    HERO_H = 220
 
     def __init__(self):
         super().__init__()
 
         self.title("RA Control Center")
-        self.geometry("1380x820")
-        self.minsize(1120, 680)
+        self.geometry("1280x800")
+        self.minsize(980, 640)
         self.configure(fg_color=PALETTE["bg"])
-
-        self.search_var = ctk.StringVar(value="")
-        self.nav_items = {}
 
         self._fonts()
         self.build()
@@ -164,19 +282,12 @@ class ControlCenter(ctk.CTk):
     # =================================================================
 
     def _fonts(self):
-        self.f_brand = ctk.CTkFont(family=FONT, size=17, weight="bold")
-        self.f_brand_sub = ctk.CTkFont(family=FONT, size=10)
-        self.f_group = ctk.CTkFont(family=FONT, size=10, weight="bold")
-        self.f_nav = ctk.CTkFont(family=FONT, size=12, weight="bold")
-        self.f_page = ctk.CTkFont(family=FONT, size=24, weight="bold")
+        self.f_eyebrow = ctk.CTkFont(family=FONT, size=11, weight="bold")
+        self.f_section = ctk.CTkFont(family=SERIF, size=20, weight="bold")
         self.f_hint = ctk.CTkFont(family=FONT, size=11)
-        self.f_search = ctk.CTkFont(family=FONT, size=12)
-        self.f_status = ctk.CTkFont(family=FONT, size=10, weight="bold")
-        self.f_avatar = ctk.CTkFont(family=FONT, size=11, weight="bold")
-        self.f_card_name = ctk.CTkFont(family=FONT, size=16, weight="bold")
-        self.f_card_desc = ctk.CTkFont(family=FONT, size=11)
-        self.f_card_cta = ctk.CTkFont(family=FONT, size=11, weight="bold")
-        self.f_badge = ctk.CTkFont(family=FONT, size=9, weight="bold")
+        self.f_card_name = ctk.CTkFont(family=FONT, size=14, weight="bold")
+        self.f_card_desc = ctk.CTkFont(family=FONT, size=10)
+        self.f_missing = ctk.CTkFont(family=FONT, size=9)
         self.f_footer = ctk.CTkFont(family=FONT, size=9)
 
     # =================================================================
@@ -185,370 +296,201 @@ class ControlCenter(ctk.CTk):
 
     def build(self):
 
-        self.build_sidebar()
+        self.build_hero()
 
-        right = ctk.CTkFrame(self, fg_color=PALETTE["bg"], corner_radius=0)
-        right.pack(side="left", fill="both", expand=True)
+        # le footer est empaqueté AVANT la section extensible, sinon
+        # il peut être écrasé quand la fenêtre est petite
+        self.build_footer()
 
-        self.build_header(right)
-        self.build_footer(right)
-        self.build_body(right)
+        section = ctk.CTkFrame(self, fg_color=PALETTE["bg"], corner_radius=0)
+        section.pack(fill="both", expand=True)
 
-    # =================================================================
-    # SIDEBAR
-    # =================================================================
-
-    def build_sidebar(self):
-
-        sidebar = ctk.CTkFrame(
-            self, fg_color=PALETTE["surface"], width=272, corner_radius=0
-        )
-        sidebar.pack(side="left", fill="y")
-        sidebar.pack_propagate(False)
-
-        # séparateur droit
-        ctk.CTkFrame(self, fg_color=PALETTE["border"], width=1, corner_radius=0).pack(
-            side="left", fill="y"
-        )
-
-        # ---- Marque ----
-        brand = ctk.CTkFrame(sidebar, fg_color="transparent")
-        brand.pack(fill="x", padx=24, pady=(26, 28))
+        head = ctk.CTkFrame(section, fg_color="transparent")
+        head.pack(fill="x", padx=40, pady=(28, 4))
 
         ctk.CTkLabel(
-            brand, text="", image=icon("logo", PALETTE["brand"], 38),
-            fg_color="transparent"
-        ).pack(side="left", padx=(0, 12))
-
-        titles = ctk.CTkFrame(brand, fg_color="transparent")
-        titles.pack(side="left")
+            head, text="Nos modules", font=self.f_eyebrow,
+            text_color=PALETTE["accent"], fg_color="transparent"
+        ).pack(anchor="w")
 
         ctk.CTkLabel(
-            titles, text="RA Control Center", font=self.f_brand,
+            head, text="Un module par périmètre de contrôle", font=self.f_section,
             text_color=PALETTE["text"], fg_color="transparent"
-        ).pack(anchor="w")
+        ).pack(anchor="w", pady=(4, 0))
 
         ctk.CTkLabel(
-            titles, text="Revenue Assurance", font=self.f_brand_sub,
-            text_color=PALETTE["muted"], fg_color="transparent"
-        ).pack(anchor="w")
-
-        # ---- Navigation ----
-        ctk.CTkLabel(
-            sidebar, text="MENU", font=self.f_group,
-            text_color=PALETTE["muted"], fg_color="transparent"
-        ).pack(anchor="w", padx=28, pady=(0, 10))
-
-        nav = ctk.CTkFrame(sidebar, fg_color="transparent")
-        nav.pack(fill="x", padx=16)
-
-        self.build_nav_item(nav, "home", "Accueil", "home", active=True)
-
-        ctk.CTkLabel(
-            sidebar, text="MODULES", font=self.f_group,
-            text_color=PALETTE["muted"], fg_color="transparent"
-        ).pack(anchor="w", padx=28, pady=(22, 10))
-
-        nav2 = ctk.CTkFrame(sidebar, fg_color="transparent")
-        nav2.pack(fill="x", padx=16)
-
-        for name, _desc, icon_name, key in self.MODULES:
-            self.build_nav_item(nav2, key, name, icon_name)
-
-        # ---- Bas de sidebar ----
-        ctk.CTkLabel(
-            sidebar, text="v1.0", font=self.f_footer,
-            text_color=PALETTE["muted"], fg_color="transparent"
-        ).pack(side="bottom", anchor="w", padx=28, pady=20)
-
-    def build_nav_item(self, parent, key, label, icon_name, active=False):
-
-        row = ctk.CTkFrame(
-            parent, height=44, corner_radius=10,
-            fg_color=PALETTE["brand_soft"] if active else "transparent"
-        )
-        row.pack(fill="x", pady=2)
-        row.pack_propagate(False)
-
-        color = PALETTE["brand"] if active else PALETTE["muted"]
-
-        ico = ctk.CTkLabel(
-            row, text="", image=icon(icon_name, color, 20),
-            fg_color="transparent", width=24
-        )
-        ico.pack(side="left", padx=(14, 10))
-
-        txt = ctk.CTkLabel(
-            row, text=label, font=self.f_nav, anchor="w",
-            text_color=PALETTE["brand"] if active else PALETTE["text_soft"],
-            fg_color="transparent"
-        )
-        txt.pack(side="left", fill="x", expand=True)
-
-        self.nav_items[key] = {"row": row, "icon": ico, "text": txt,
-                               "name": icon_name, "active": active}
-
-        def enter(event=None):
-            if not self.nav_items[key]["active"]:
-                row.configure(fg_color=PALETTE["hover"])
-                ico.configure(image=icon(icon_name, PALETTE["brand"], 20))
-
-        def leave(event=None):
-            if not self.nav_items[key]["active"]:
-                row.configure(fg_color="transparent")
-                ico.configure(image=icon(icon_name, PALETTE["muted"], 20))
-
-        def click(event=None):
-            if key != "home":
-                self.open(key)
-
-        for w in (row, ico, txt):
-            w.bind("<Enter>", enter)
-            w.bind("<Leave>", leave)
-            w.bind("<Button-1>", click)
-            w.configure(cursor="hand2")
-
-    # =================================================================
-    # HEADER
-    # =================================================================
-
-    def build_header(self, parent):
-
-        header = ctk.CTkFrame(
-            parent, fg_color=PALETTE["surface"], height=76, corner_radius=0
-        )
-        header.pack(fill="x")
-        header.pack_propagate(False)
-
-        ctk.CTkFrame(parent, fg_color=PALETTE["border"], height=1, corner_radius=0).pack(fill="x")
-
-        # ---- Recherche ----
-        search = ctk.CTkFrame(
-            header, fg_color=PALETTE["surface"], corner_radius=10,
-            border_width=1, border_color=PALETTE["border"], width=380, height=44
-        )
-        search.pack(side="left", padx=(30, 0), pady=16)
-        search.pack_propagate(False)
-
-        ctk.CTkLabel(
-            search, text="", image=icon("search", PALETTE["muted"], 18),
-            fg_color="transparent"
-        ).pack(side="left", padx=(14, 6))
-
-        ctk.CTkEntry(
-            search, textvariable=self.search_var, font=self.f_search,
-            placeholder_text="Rechercher un module...",
-            fg_color="transparent", border_width=0,
-            text_color=PALETTE["text"], placeholder_text_color=PALETTE["muted"]
-        ).pack(side="left", fill="both", expand=True, padx=(0, 10))
-
-        self.search_var.trace_add("write", lambda *_: self.render_cards())
-
-        # ---- Zone droite ----
-        avatar = ctk.CTkFrame(
-            header, fg_color=PALETTE["brand_soft"], width=42, height=42, corner_radius=21
-        )
-        avatar.pack(side="right", padx=(12, 30))
-        avatar.pack_propagate(False)
-        ctk.CTkLabel(
-            avatar, text="RA", font=self.f_avatar,
-            text_color=PALETTE["brand"], fg_color="transparent"
-        ).pack(expand=True)
-
-        bell = ctk.CTkFrame(
-            header, fg_color=PALETTE["surface"], width=42, height=42, corner_radius=21,
-            border_width=1, border_color=PALETTE["border"]
-        )
-        bell.pack(side="right", padx=(12, 0))
-        bell.pack_propagate(False)
-        ctk.CTkLabel(
-            bell, text="", image=icon("bell", PALETTE["muted"], 18),
-            fg_color="transparent"
-        ).pack(expand=True)
-
-        status = ctk.CTkFrame(
-            header, fg_color=PALETTE["success_bg"], corner_radius=18, height=34
-        )
-        status.pack(side="right", pady=21)
-
-        ctk.CTkFrame(
-            status, fg_color=PALETTE["success"], width=8, height=8, corner_radius=4
-        ).pack(side="left", padx=(14, 8), pady=13)
-
-        ctk.CTkLabel(
-            status, text="Système opérationnel", font=self.f_status,
-            text_color=PALETTE["success_txt"], fg_color="transparent"
-        ).pack(side="left", padx=(0, 14))
-
-    # =================================================================
-    # FOOTER
-    # =================================================================
-
-    def build_footer(self, parent):
-
-        footer = ctk.CTkFrame(
-            parent, fg_color=PALETTE["surface"], height=44, corner_radius=0
-        )
-        footer.pack(fill="x", side="bottom")
-        footer.pack_propagate(False)
-
-        ctk.CTkFrame(parent, fg_color=PALETTE["border"], height=1, corner_radius=0).pack(
-            fill="x", side="bottom"
-        )
-
-        ctk.CTkLabel(
-            footer, text="Revenue Assurance  •  RA Control Center", font=self.f_footer,
-            text_color=PALETTE["muted"], fg_color="transparent"
-        ).pack(side="left", padx=30)
-
-        ctk.CTkLabel(
-            footer, text="v1.0", font=self.f_footer,
-            text_color=PALETTE["muted"], fg_color="transparent"
-        ).pack(side="right", padx=30)
-
-    # =================================================================
-    # BODY
-    # =================================================================
-
-    def build_body(self, parent):
-
-        body = ctk.CTkFrame(parent, fg_color=PALETTE["bg"], corner_radius=0)
-        body.pack(fill="both", expand=True, padx=30, pady=(26, 20))
-
-        top = ctk.CTkFrame(body, fg_color="transparent")
-        top.pack(fill="x", pady=(0, 24))
-
-        left = ctk.CTkFrame(top, fg_color="transparent")
-        left.pack(side="left")
-
-        ctk.CTkLabel(
-            left, text="Modules Revenue Assurance", font=self.f_page,
-            text_color=PALETTE["text"], fg_color="transparent"
-        ).pack(anchor="w")
-
-        ctk.CTkLabel(
-            left,
-            text="Sélectionnez un domaine pour ouvrir son environnement de contrôle.",
+            head,
+            text="Faites défiler pour découvrir chaque environnement de contrôle "
+                 "Revenue Assurance disponible.",
             font=self.f_hint, text_color=PALETTE["muted"], fg_color="transparent"
         ).pack(anchor="w", pady=(4, 0))
 
-        crumb = ctk.CTkLabel(
-            top, text="Accueil  /  Modules", font=self.f_hint,
-            text_color=PALETTE["muted"], fg_color="transparent"
+        # ---- Rangée à défilement HORIZONTAL, uniquement sur les cartes ----
+        strip = ctk.CTkFrame(section, fg_color="transparent")
+        strip.pack(fill="both", expand=True, padx=40, pady=(18, 30))
+
+        self.rail = ctk.CTkScrollableFrame(
+            strip, fg_color="transparent", corner_radius=0,
+            orientation="horizontal", height=self.CARD_H + 26,
+            scrollbar_button_color=PALETTE["border"],
+            scrollbar_button_hover_color=PALETTE["muted"]
         )
-        crumb.pack(side="right", anchor="n", pady=8)
+        self.rail.pack(fill="both", expand=True)
 
-        self.grid_area = ctk.CTkFrame(body, fg_color="transparent")
-        self.grid_area.pack(fill="both", expand=True)
+        self.render_modules()
 
-        for c in range(3):
-            self.grid_area.grid_columnconfigure(c, weight=1, uniform="col")
-        for r in range(2):
-            self.grid_area.grid_rowconfigure(r, weight=1, uniform="row")
+    # =================================================================
+    # HERO (Canvas pleine largeur : la photo suit la taille de la fenêtre)
+    # =================================================================
 
-        self.render_cards()
+    def build_hero(self):
 
-    def render_cards(self):
+        self._hero_job = None
+        self._hero_photo = None
+        self._hero_w = 0
 
-        for w in self.grid_area.winfo_children():
+        self.hero = tk.Canvas(
+            self, height=self.HERO_H, bg=PALETTE["hero_dark"],
+            highlightthickness=0, bd=0
+        )
+        self.hero.pack(fill="x")
+        self.hero.bind("<Configure>", self._on_hero_resize)
+
+    def _on_hero_resize(self, event):
+        if event.width <= 1 or event.width == self._hero_w:
+            return
+        self._hero_w = event.width
+        if self._hero_job:
+            self.after_cancel(self._hero_job)
+        self._hero_job = self.after(40, lambda: self._draw_hero(event.width))
+
+    def _draw_hero(self, w):
+
+        self._hero_job = None
+
+        h = self.HERO_H
+        c = self.hero
+        c.delete("all")
+
+        photo = _hero_pil(w, h)
+
+        if photo is not None:
+            self._hero_photo = ImageTk.PhotoImage(photo)   # garder la référence
+            c.create_image(0, 0, image=self._hero_photo, anchor="nw")
+        else:
+            c.create_text(
+                w // 2, h // 2, anchor="center", fill="#7B818C",
+                font=(FONT, 9), width=520, justify="center",
+                text="assets/hero.jpg introuvable -- déposez une photo "
+                     "télécom (au moins 1600×500 px) à cet emplacement."
+            )
+
+        cy = h // 2
+        x = 48
+
+        c.create_text(x, cy - 62, anchor="w", fill="#9FB3DE",
+                      font=(FONT, 11, "bold"),
+                      text="REVENUE ASSURANCE  •  CONTROL CENTER")
+
+        c.create_text(x, cy - 22, anchor="w", fill="#FFFFFF",
+                      font=(SERIF, 30, "bold"),
+                      text="Un point d'entrée unique pour piloter vos contrôles")
+
+        c.create_text(x, cy + 38, anchor="w", fill="#C7D3EA",
+                      font=(FONT, 12), justify="left",
+                      text="Fixe, Fibre, Interconnexion, SIMBOX, Messaging et Franchise --\n"
+                           "chaque module ouvre son propre environnement de suivi.")
+
+    def _missing_notice(self, parent, message):
+        """Bloc neutre affiché quand une image locale n'a pas encore été déposée."""
+
+        ctk.CTkLabel(
+            parent, text=message, font=self.f_missing,
+            text_color="#7B818C", fg_color="transparent",
+            wraplength=520, justify="center"
+        ).place(relx=0.5, rely=0.5, anchor="center")
+
+    # =================================================================
+    # CARTES DE MODULE (défilement horizontal)
+    # =================================================================
+
+    def render_modules(self):
+
+        for w in self.rail.winfo_children():
             w.destroy()
 
-        query = self.search_var.get().strip().lower()
+        for module in self.MODULES:
+            card = self.build_module_card(self.rail, module)
+            card.pack(side="left", padx=(0, 16), pady=4)
 
-        modules = [
-            m for m in self.MODULES
-            if not query or query in m[0].lower() or query in m[1].lower()
-        ]
+    def build_module_card(self, parent, module):
 
-        if not modules:
-            ctk.CTkLabel(
-                self.grid_area, text="Aucun module ne correspond à votre recherche.",
-                font=self.f_hint, text_color=PALETTE["muted"], fg_color="transparent"
-            ).grid(row=0, column=0, columnspan=3, pady=40)
-            return
-
-        for i, module in enumerate(modules):
-            card = self.build_card(self.grid_area, module)
-            card.grid(row=i // 3, column=i % 3, sticky="nsew", padx=8, pady=8)
-
-    # =================================================================
-    # CARTE MODULE
-    # =================================================================
-
-    def build_card(self, parent, module):
-
-        name, desc, icon_name, key = module
+        name, desc, key = module
         available = key in self.AVAILABLE
 
         card = ctk.CTkFrame(
-            parent, fg_color=PALETTE["surface"], corner_radius=16,
-            border_width=1, border_color=PALETTE["border"]
+            parent, fg_color=PALETTE["surface"], corner_radius=14,
+            border_width=1, border_color=PALETTE["border"],
+            width=self.CARD_W, height=self.CARD_H, cursor="hand2"
         )
+        card.pack_propagate(False)
 
-        # ---- Ligne haute : icône + badge ----
-        top = ctk.CTkFrame(card, fg_color="transparent")
-        top.pack(fill="x", padx=24, pady=(24, 0))
+        # ---- Zone photo ----
+        # L'image (recadrée + arrondie sur ses deux coins hauts, avec
+        # une vraie transparence) est posée directement sur la carte,
+        # sans cadre intermédiaire : le contour rond de la carte reste
+        # visible tel qu'il est dessiné, aucun angle carré ne dépasse.
+        img = module_image(key, self.CARD_W - 2, self.IMG_H, round_top_radius=13)
 
-        icon_box = ctk.CTkFrame(
-            top, fg_color=PALETTE["brand_soft"], width=56, height=56, corner_radius=14
-        )
-        icon_box.pack(side="left")
-        icon_box.pack_propagate(False)
-
-        ctk.CTkLabel(
-            icon_box, text="", image=icon(icon_name, PALETTE["brand"], 26),
-            fg_color="transparent"
-        ).pack(expand=True)
-
-        ctk.CTkLabel(
-            top,
-            text="  Disponible  " if available else "  Bientôt  ",
-            font=self.f_badge, height=22, corner_radius=11,
-            text_color=PALETTE["success_txt"] if available else PALETTE["muted"],
-            fg_color=PALETTE["success_bg"] if available else PALETTE["neutral_bg"]
-        ).pack(side="right", anchor="n")
+        if img is not None:
+            img_widget = ctk.CTkLabel(card, text="", image=img, fg_color="transparent")
+            img_widget.place(x=1, y=1)
+        else:
+            img_widget = ctk.CTkFrame(
+                card, fg_color=PALETTE["accent_soft"], corner_radius=0,
+                width=self.CARD_W - 2, height=self.IMG_H
+            )
+            img_widget.place(x=1, y=1)
+            self._missing_notice(
+                img_widget,
+                f"assets/modules/{MODULE_IMAGE_FILES.get(key, '?')} manquant"
+            )
 
         # ---- Texte ----
-        ctk.CTkLabel(
-            card, text=name, font=self.f_card_name,
-            text_color=PALETTE["text"], fg_color="transparent"
-        ).pack(anchor="w", padx=24, pady=(18, 0))
+        text_zone = ctk.CTkFrame(
+            card, fg_color="transparent",
+            width=self.CARD_W - 36, height=self.CARD_H - self.IMG_H - 30
+        )
+        text_zone.place(x=18, y=self.IMG_H + 16)
 
         ctk.CTkLabel(
-            card, text=desc, font=self.f_card_desc,
+            text_zone, text=name, font=self.f_card_name,
+            text_color=PALETTE["text"], fg_color="transparent", anchor="w"
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            text_zone, text=desc, font=self.f_card_desc,
             text_color=PALETTE["muted"], fg_color="transparent",
-            wraplength=290, justify="left"
-        ).pack(anchor="w", padx=24, pady=(6, 20))
+            anchor="w", justify="left", wraplength=self.CARD_W - 36
+        ).pack(anchor="w", pady=(6, 0))
 
-        # ---- Séparateur + CTA ----
-        ctk.CTkFrame(card, height=1, fg_color=PALETTE["border"]).pack(fill="x", padx=24)
-
-        cta = ctk.CTkFrame(card, fg_color="transparent")
-        cta.pack(fill="x", padx=24, pady=16, side="bottom")
-
-        cta_color = PALETTE["brand"] if available else PALETTE["muted"]
-
-        ctk.CTkLabel(
-            cta, text="Ouvrir le module" if available else "Bientôt disponible",
-            font=self.f_card_cta, text_color=cta_color, fg_color="transparent"
-        ).pack(side="left")
-
-        ctk.CTkLabel(
-            cta, text="", image=icon("arrow", cta_color, 18), fg_color="transparent"
-        ).pack(side="right")
+        if not available:
+            ctk.CTkLabel(
+                text_zone, text="Bientôt disponible", font=self.f_card_desc,
+                text_color=PALETTE["accent"], fg_color="transparent", anchor="w"
+            ).pack(anchor="w", pady=(10, 0))
 
         # -----------------------------------------------------------
-        # Interactions (clic + hover)
+        # Interactions
         # -----------------------------------------------------------
 
         def click(event=None):
             self.open(key)
 
         def enter(event=None):
-            card.configure(border_color=PALETTE["brand"])
+            card.configure(border_color=PALETTE["accent"])
 
         def leave(event=None):
-            # ne pas quitter l'état hover si la souris passe sur un enfant
             try:
                 x, y = card.winfo_pointerxy()
                 under = card.winfo_containing(x, y)
@@ -558,7 +500,7 @@ class ControlCenter(ctk.CTk):
                 pass
             card.configure(border_color=PALETTE["border"])
 
-        def bind_recursive(widget):
+        for widget in (card, img_widget, text_zone):
             widget.bind("<Button-1>", click)
             widget.bind("<Enter>", enter)
             widget.bind("<Leave>", leave)
@@ -566,12 +508,36 @@ class ControlCenter(ctk.CTk):
                 widget.configure(cursor="hand2")
             except Exception:
                 pass
-            for child in widget.winfo_children():
-                bind_recursive(child)
 
-        bind_recursive(card)
+        for child in text_zone.winfo_children():
+            child.bind("<Button-1>", click)
+            child.configure(cursor="hand2")
 
         return card
+
+    # =================================================================
+    # FOOTER
+    # =================================================================
+
+    def build_footer(self):
+
+        ctk.CTkFrame(self, fg_color=PALETTE["border"], height=1, corner_radius=0).pack(
+            fill="x", side="bottom"
+        )
+
+        footer = ctk.CTkFrame(self, fg_color=PALETTE["surface"], height=40, corner_radius=0)
+        footer.pack(fill="x", side="bottom")
+        footer.pack_propagate(False)
+
+        ctk.CTkLabel(
+            footer, text="Revenue Assurance  •  RA Control Center", font=self.f_footer,
+            text_color=PALETTE["muted"], fg_color="transparent"
+        ).pack(side="left", padx=40)
+
+        ctk.CTkLabel(
+            footer, text="v1.0", font=self.f_footer,
+            text_color=PALETTE["muted"], fg_color="transparent"
+        ).pack(side="right", padx=40)
 
     # =================================================================
     # OUVERTURE D'UN MODULE
