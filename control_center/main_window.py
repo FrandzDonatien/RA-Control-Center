@@ -543,8 +543,8 @@ class ControlCenter(ctk.CTk):
     # OUVERTURE D'UN MODULE
     # =================================================================
 
-    def open(self, key):
-
+    def openOld(self, key):
+        print(f"Ouverture du module {key.upper()}...")
         if key != "fixe":
             messagebox.showinfo(
                 key.upper(),
@@ -562,6 +562,9 @@ class ControlCenter(ctk.CTk):
                 parent=self
             )
             return
+
+        # Cacher le Control Center
+        self.withdraw()
 
         w = ctk.CTkToplevel(self)
         w.withdraw()
@@ -584,7 +587,84 @@ class ControlCenter(ctk.CTk):
             Dashboard(w)
         except Exception as e:
             w.destroy()
+
+            # Réafficher le Control Center si erreur
+            self.deiconify()
+            self.lift()
             messagebox.showerror("Erreur Dashboard FIXE", str(e), parent=self)
             return
 
         w.after(10, w.deiconify)  # affiche seulement une fois le contenu construit
+
+    # Quand le dashboard est fermé
+    
+
+    def open(self, key):
+        print(f"Ouverture du module {key.upper()}...")
+
+        if key != "fixe":
+            messagebox.showinfo(
+                key.upper(),
+                f"Le module {key.upper()} sera ajouté prochainement.",
+                parent=self
+            )
+            return
+
+        try:
+            from modules.fixe.dashboard import Dashboard
+        except ImportError as e:
+            messagebox.showerror(
+                "Dashboard FIXE",
+                "Impossible de charger le module FIXE.\n\n" + str(e),
+                parent=self
+            )
+            return
+
+        # Cacher le Control Center
+        self.withdraw()
+
+        def on_module_close():
+            try:
+                w.destroy()
+            finally:
+                self.deiconify()
+                self.lift()
+                self.focus_force()
+
+        w = ctk.CTkToplevel(self)
+        w.withdraw()
+
+        w.title("RA • FIXE")
+        w.geometry("1500x950")
+        w.minsize(1250, 800)
+        w.configure(fg_color=PALETTE["bg"])
+
+        try:
+            w.tk.call("tk", "scaling", 1.20)
+        except Exception:
+            pass
+
+        try:
+            Dashboard(
+                w,
+                perimetre="FXL",
+                mode_execution="COMMIT",
+                on_close=on_module_close
+            )
+        except TypeError:
+            Dashboard(w)
+        except Exception as e:
+            w.destroy()
+            # Réafficher le Control Center si erreur
+            self.deiconify()
+            self.lift()
+            messagebox.showerror(
+                "Erreur Dashboard FIXE",
+                str(e),
+                parent=self
+            )
+            return
+
+        w.protocol("WM_DELETE_WINDOW", on_module_close)
+        w.after(10, w.deiconify)
+        w.after(50, w.lift)

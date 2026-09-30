@@ -30,9 +30,10 @@ NAV_ITEMS = [
 
 class Dashboard:
 
-    def __init__(self, root, perimetre="FXL", mode_execution="COMMIT"):
+    def __init__(self, root, perimetre="FXL", mode_execution="COMMIT", on_close=None):
 
         self.root = root
+        self.on_close = on_close
 
         self.root.title(APP_TITLE)
         self.root.geometry(f"{APP_WIDTH}x{APP_HEIGHT}")
@@ -255,7 +256,10 @@ class Dashboard:
             )
 
     def close_window(self):
-        self.root.destroy()
+        if self.on_close:
+            self.on_close()
+        else:
+            self.root.destroy()
 
     # =============================================================
     # HEADER

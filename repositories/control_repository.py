@@ -138,7 +138,7 @@ class ControlRepository:
  
     def get_detailsOld(self, control_id, date_controle):
         return fetch_all("""
-            SELECT cle_metier, categorie, detail, date_controle
+            SELECT service_id, categorie, detail, date_controle
             FROM ra_controls_details
             WHERE control_id = %s
               AND date_controle = %s
@@ -148,7 +148,7 @@ class ControlRepository:
  
     def get_details(self, control_id, date_controle, perimetre="FXL", mode_execution="COMMIT"):
         return fetch_all("""
-            SELECT cle_metier, categorie, detail, date_controle
+            SELECT service_id, categorie, detail, date_controle
             FROM ra_controls_details
             WHERE control_id = %s
             AND date_controle = %s
@@ -159,7 +159,6 @@ class ControlRepository:
                 SELECT id FROM ra_controls_catalog_mode_execution WHERE mode_execution = %s
             )
             ORDER BY id
-            LIMIT 100
         """, (control_id, date_controle, perimetre, mode_execution))
  
     def get_log_summary(self, control_id, date_controle):

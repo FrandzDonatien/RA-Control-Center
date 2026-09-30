@@ -417,7 +417,7 @@ class DetailModal(ctk.CTkToplevel):
     def build_dynamic_columns(self):
 
         columns = [
-            "cle_metier",
+            "service_id",
             "categorie"
         ]
 
@@ -442,7 +442,7 @@ class DetailModal(ctk.CTkToplevel):
                 anchor="w"
             )
 
-            if column == "cle_metier":
+            if column == "service_id":
                 width = 130
 
             elif column == "categorie":
@@ -485,7 +485,7 @@ class DetailModal(ctk.CTkToplevel):
             detail = row.get("detail") or {}
 
             values = [
-                row.get("cle_metier", ""),
+                row.get("service_id", ""),
                 row.get("categorie", "")
             ]
 

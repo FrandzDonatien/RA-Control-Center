@@ -27,7 +27,6 @@ class ControlCard:
 
 @dataclass
 class DetailRow:
-    cle_metier: str
-    categorie: str
+    service_id: str
     detail: dict
     date_controle: date
