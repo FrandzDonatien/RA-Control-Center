@@ -28,32 +28,48 @@ PALETTE = {
 FONT = "Segoe UI"
 SERIF = "Georgia"
 
-
-# =====================================================================
-# EMPLACEMENT DES IMAGES
-# =====================================================================
-# Toutes les images sont des fichiers locaux, à déposer vous-même dans
-# ce dossier. Rien n'est téléchargé ni généré : si un fichier manque,
-# un simple bloc neutre l'indique à la place -- jamais d'illustration
-# dessinée en remplacement.
-#
-# Résolutions minimales conseillées pour éviter tout flou à l'écran :
-#   - hero.jpg          : au moins 1600 x 500 px (bannière très large)
-#   - modules/<clé>.jpg : au moins 640 x 360 px  (ratio ~16:9)
-
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 MODULES_DIR = os.path.join(ASSETS_DIR, "modules")
 
 HERO_IMAGE_PATH = os.path.join(ASSETS_DIR, "hero.jpg")
 
+# Icône de l'application (fichier .ico multi-tailles : 16 à 256 px)
+APP_ICON_PATH = os.path.join(ASSETS_DIR, "Logo_RA-CONTROL_CENTER.ico")
+
 MODULE_IMAGE_FILES = {
     "fixe":         "fixe.jpg",
+    "wifi":         "wifi.png",
     "ftth":         "ftth.jpg",
     "interconnect": "interconnect.jpg",
     "simbox":       "simbox.jpg",
     "a2p_p2a":      "a2p_p2a.jpg",
     "franchise":    "franchise.jpg",
 }
+
+
+# =====================================================================
+# ICONE DE FENETRE
+# =====================================================================
+
+def apply_window_icon(window):
+    """
+    Applique app.ico à une fenêtre (CTk ou CTkToplevel).
+
+    CustomTkinter impose sa propre icône environ 200 ms après la création
+    de la fenêtre : on applique donc la nôtre APRES ce délai, sinon elle
+    est écrasée.
+    """
+    if not os.path.isfile(APP_ICON_PATH):
+        return
+
+    def _set():
+        try:
+            if window.winfo_exists():
+                window.iconbitmap(APP_ICON_PATH)
+        except Exception:
+            pass
+
+    window.after(250, _set)
 
 
 # =====================================================================
@@ -251,6 +267,7 @@ class ControlCenter(ctk.CTk):
     # (nom, description, clé)
     MODULES = [
         ("FIXE",         "Dashboard Postpaid / Fixe",   "fixe"),
+        ("YAS WIFI",         "Dashboard yas wifi zône",     "wifi"),
         ("FTTH",         "Contrôles Fibre",             "ftth"),
         ("INTERCONNECT", "Contrôles Interconnect",      "interconnect"),
         ("SIMBOX",       "Contrôles SIMBOX",            "simbox"),
@@ -258,7 +275,7 @@ class ControlCenter(ctk.CTk):
         ("FRANCHISE",    "Contrôles Franchise",         "franchise"),
     ]
 
-    AVAILABLE = {"fixe"}
+    AVAILABLE = {"fixe","wifi"}
 
     CARD_W = 260
     CARD_H = 300
@@ -270,6 +287,7 @@ class ControlCenter(ctk.CTk):
         super().__init__()
 
         self.title("RA Control Center")
+        apply_window_icon(self)
         self.geometry("1280x800")
         self.minsize(980, 640)
         self.configure(fg_color=PALETTE["bg"])
@@ -280,7 +298,6 @@ class ControlCenter(ctk.CTk):
     # =================================================================
     # POLICES
     # =================================================================
-
     def _fonts(self):
         self.f_eyebrow = ctk.CTkFont(family=FONT, size=11, weight="bold")
         self.f_section = ctk.CTkFont(family=SERIF, size=20, weight="bold")
@@ -293,7 +310,6 @@ class ControlCenter(ctk.CTk):
     # =================================================================
     # BUILD
     # =================================================================
-
     def build(self):
 
         self.build_hero()
@@ -342,7 +358,6 @@ class ControlCenter(ctk.CTk):
     # =================================================================
     # HERO (Canvas pleine largeur : la photo suit la taille de la fenêtre)
     # =================================================================
-
     def build_hero(self):
 
         self._hero_job = None
@@ -434,12 +449,6 @@ class ControlCenter(ctk.CTk):
             width=self.CARD_W, height=self.CARD_H, cursor="hand2"
         )
         card.pack_propagate(False)
-
-        # ---- Zone photo ----
-        # L'image (recadrée + arrondie sur ses deux coins hauts, avec
-        # une vraie transparence) est posée directement sur la carte,
-        # sans cadre intermédiaire : le contour rond de la carte reste
-        # visible tel qu'il est dessiné, aucun angle carré ne dépasse.
         img = module_image(key, self.CARD_W - 2, self.IMG_H, round_top_radius=13)
 
         if img is not None:
@@ -542,129 +551,59 @@ class ControlCenter(ctk.CTk):
     # =================================================================
     # OUVERTURE D'UN MODULE
     # =================================================================
+    def open(self, key):
+        if key == "fixe":
+            try:
+                from modules.fixe.dashboard import Dashboard as FixedDashboard
+                DashboardClass = FixedDashboard
+            except ImportError as e:
+                messagebox.showerror("Dashboard FIXE",f"Impossible de charger le module FIXE.\n\n{e}",parent=self)
+                return
 
-    def openOld(self, key):
-        print(f"Ouverture du module {key.upper()}...")
-        if key != "fixe":
-            messagebox.showinfo(
-                key.upper(),
-                f"Le module {key.upper()} sera ajouté prochainement.",
-                parent=self
-            )
+            title = "RA • FIXE"
+            dashboard_kwargs = {
+                "perimetre": "FXL",
+                "mode_execution": "COMMIT",
+            }
+
+        elif key == "wifi":
+            try:
+                from modules.wifi.wifi_dashboard import WifiDashboard
+                DashboardClass = WifiDashboard
+            except ImportError as e:
+                messagebox.showerror("Dashboard WIFI",f"Impossible de charger le module WIFI.\n\n{e}",parent=self)
+                return
+
+            title = "RA • YAS WIFI"
+            dashboard_kwargs = {}
+
+        else:
+            messagebox.showinfo("Module indisponible",f"Le module {key.upper()} n'est pas encore disponible.",parent=self)
             return
 
-        try:
-            from modules.fixe.dashboard import Dashboard
-        except ImportError as e:
-            messagebox.showerror(
-                "Dashboard FIXE",
-                "Impossible de charger le module FIXE.\n\n" + str(e),
-                parent=self
-            )
-            return
-
-        # Cacher le Control Center
-        self.withdraw()
-
+        # Créer la fenêtre du module
         w = ctk.CTkToplevel(self)
-        w.withdraw()
-        w.title("RA • FIXE")
+        w.title(title)
+        apply_window_icon(w)
         w.geometry("1500x950")
         w.minsize(1250, 800)
         w.configure(fg_color=PALETTE["bg"])
-
-        w.lift()
-        w.focus_force()
-
-        try:
-            w.tk.call("tk", "scaling", 1.20)
-        except Exception:
-            pass
-
-        try:
-            Dashboard(w, perimetre="FXL", mode_execution="COMMIT")
-        except TypeError:
-            Dashboard(w)
-        except Exception as e:
-            w.destroy()
-
-            # Réafficher le Control Center si erreur
-            self.deiconify()
-            self.lift()
-            messagebox.showerror("Erreur Dashboard FIXE", str(e), parent=self)
-            return
-
-        w.after(10, w.deiconify)  # affiche seulement une fois le contenu construit
-
-    # Quand le dashboard est fermé
-    
-
-    def open(self, key):
-        print(f"Ouverture du module {key.upper()}...")
-
-        if key != "fixe":
-            messagebox.showinfo(
-                key.upper(),
-                f"Le module {key.upper()} sera ajouté prochainement.",
-                parent=self
-            )
-            return
-
-        try:
-            from modules.fixe.dashboard import Dashboard
-        except ImportError as e:
-            messagebox.showerror(
-                "Dashboard FIXE",
-                "Impossible de charger le module FIXE.\n\n" + str(e),
-                parent=self
-            )
-            return
-
-        # Cacher le Control Center
-        self.withdraw()
 
         def on_module_close():
-            try:
+            if w.winfo_exists():
                 w.destroy()
-            finally:
-                self.deiconify()
-                self.lift()
-                self.focus_force()
-
-        w = ctk.CTkToplevel(self)
-        w.withdraw()
-
-        w.title("RA • FIXE")
-        w.geometry("1500x950")
-        w.minsize(1250, 800)
-        w.configure(fg_color=PALETTE["bg"])
-
-        try:
-            w.tk.call("tk", "scaling", 1.20)
-        except Exception:
-            pass
-
-        try:
-            Dashboard(
-                w,
-                perimetre="FXL",
-                mode_execution="COMMIT",
-                on_close=on_module_close
-            )
-        except TypeError:
-            Dashboard(w)
-        except Exception as e:
-            w.destroy()
-            # Réafficher le Control Center si erreur
             self.deiconify()
             self.lift()
-            messagebox.showerror(
-                "Erreur Dashboard FIXE",
-                str(e),
-                parent=self
-            )
+            self.focus_force()
+
+        try:
+            DashboardClass(w,**dashboard_kwargs,on_close=on_module_close)
+        except Exception as e:
+            w.destroy()
+            self.deiconify()
+            self.lift()
+            messagebox.showerror(f"Erreur Dashboard {key.upper()}",str(e),parent=self)
             return
 
         w.protocol("WM_DELETE_WINDOW", on_module_close)
-        w.after(10, w.deiconify)
-        w.after(50, w.lift)
+        self.withdraw()
