@@ -1,5 +1,6 @@
 import tkinter as tk
 import tkinter.font as tkfont
+import traceback
 from math import floor, log10
 from statistics import median
 
@@ -10,6 +11,8 @@ from ui.palette import FONT as BASE_FONT
 from util.theme import T, fmt
 from util.togo_map import TogoMap
 from util.spots import make_spots
+from repositories.yas_wifi_repository import YasWifiRepository
+from util.wifi_report import build_report, default_control_date
 
 UI_FONT = BASE_FONT  # remplacé par "Outfit" si la police est installée
 
@@ -148,11 +151,14 @@ class Chart(tk.Canvas):
 
 class WifiDashboard:
 
-    def __init__(self, root, on_close=None, repository=None):
+    def __init__(self, root, on_close=None, repository=None,
+                 date_controle=None, demo=False):
 
         self.root = root
         self.on_close = on_close
-        self.repository = repository  # branchez ici votre source réelle
+        # demo=True : données fictives (sans base). Sinon : repository fourni, ou celui par défaut.
+        self.repository = None if demo else (repository or YasWifiRepository())
+        self.date_controle = date_controle      # None = la veille
 
         self.root.title("Rapport quotidien — revenus YAS WiFi")
         self.root.configure(fg_color=T["bg"]) if hasattr(self.root, "configure") else None
@@ -162,13 +168,20 @@ class WifiDashboard:
         self.refresh()
 
     # -------------------------------------------------------------
-    # DONNEES (démo) — remplacer par votre table de revenus
+    # DONNEES : table revenu_yas_wifi via le repository
     # -------------------------------------------------------------
 
     def get_report_data(self):
 
-        if self.repository is not None and hasattr(self.repository, "get_wifi_report"):
-            return self.repository.get_wifi_report()
+        if self.repository is None:
+            return self._demo_data()
+
+        jour = self.date_controle or default_control_date()
+        rows = self.repository.get_wifi_report(jour)
+        return build_report(rows, jour)
+
+    def _demo_data(self):
+        """Données fictives (mode demo=True) : aucune base nécessaire."""
 
         days = ["21/09", "22/09", "23/09", "24/09", "25/09", "26/09", "27/09",
                 "28/09", "29/09", "30/09", "01/10", "02/10", "03/10", "04/10",
@@ -288,13 +301,21 @@ class WifiDashboard:
 
     def refresh(self):
 
-        self.data = self.get_report_data()
+        self.error = None
+        try:
+            self.data = self.get_report_data()
+        except Exception as exc:
+            traceback.print_exc()
+            self.data, self.error = None, exc
 
         for frame in (self.topbar, self.body):
             for w in frame.winfo_children():
                 w.destroy()
 
         self.build_topbar()
+        if self.error is not None:
+            self.build_error(self.body)
+            return
         self.build_alert(self.body)
         self.build_kpis(self.body)
         self.build_main(self.body)
@@ -342,10 +363,25 @@ class WifiDashboard:
             corner_radius=10, height=40, width=130, command=self.refresh
         ).pack(side="right")
 
-        make_pill(
-            self.topbar, f"Contrôle du {self.data['checked_day']}",
-            T["text_soft"], T["gray100"], height=32, size=11
-        ).pack(side="right", padx=(0, 12))
+        if self.data:
+            make_pill(
+                self.topbar, f"Contrôle du {self.data['checked_day']}",
+                T["text_soft"], T["gray100"], height=32, size=11
+            ).pack(side="right", padx=(0, 12))
+
+    def build_error(self, parent):
+
+        box = ctk.CTkFrame(parent, fg_color=T["err_50"], corner_radius=14,
+                           border_width=1, border_color=T["err_200"])
+        box.pack(fill="x", pady=(0, 16))
+        ctk.CTkLabel(
+            box, text="Impossible de charger le rapport", font=self.f_alert_title,
+            text_color=T["err_text"], fg_color="transparent"
+        ).pack(anchor="w", padx=20, pady=(16, 0))
+        ctk.CTkLabel(
+            box, text=str(self.error), font=self.f_alert_sub, text_color=T["text_soft"],
+            fg_color="transparent", wraplength=900, justify="left"
+        ).pack(anchor="w", padx=20, pady=(2, 16))
 
     # -------------------------------------------------------------
     # ALERTE GLOBALE (style TailAdmin "Alert")
@@ -493,6 +529,10 @@ class WifiDashboard:
         right = make_card(wrap)
         right.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
 
+        if not d["zones"]:
+            self._build_no_zones(right)
+            return
+
         ctk.CTkLabel(right, text="Zones de recharge", font=self.f_card_title,
                      text_color=T["text"], fg_color="transparent"
                      ).pack(anchor="w", padx=20, pady=(18, 0))
@@ -517,6 +557,21 @@ class WifiDashboard:
             self._zone_row(right, z)
 
         ctk.CTkFrame(right, fg_color="transparent", height=10).pack()
+
+    def _build_no_zones(self, card):
+
+        ctk.CTkLabel(card, text="Zones de recharge", font=self.f_card_title,
+                     text_color=T["text"], fg_color="transparent"
+                     ).pack(anchor="w", padx=20, pady=(18, 0))
+        ctk.CTkLabel(
+            card,
+            text="Répartition géographique indisponible : la table revenu_yas_wifi "
+                 "ne contient ni zone ni ville (colonnes : day, number_lines, "
+                 "unit_price, total_revenue).\n\nPour activer la carte, il faut une "
+                 "table ou une colonne donnant le revenu par zone.",
+            font=self.f_card_sub, text_color=T["muted"], fg_color="transparent",
+            wraplength=360, justify="left"
+        ).pack(anchor="w", padx=20, pady=(8, 20))
 
     def _zone_row(self, parent, z):
 
@@ -683,5 +738,6 @@ if __name__ == "__main__":
     app = ctk.CTk()
     app.geometry("1360x900")
     app.minsize(1200, 750)
-    WifiDashboard(app)
+    import sys
+    WifiDashboard(app, demo="--demo" in sys.argv)   # --demo : données fictives, sans base
     app.mainloop()
